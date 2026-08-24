@@ -53,8 +53,10 @@ export type ReaderSelectionLine = {
 export type ReaderSelectionLayout = {
   firstPageText: string;
   firstPageLines?: readonly ReaderSelectionLine[];
+  firstPageDocumentLines?: readonly ReaderSelectionLine[];
   nextPageText: string;
   nextPageLines: readonly ReaderSelectionLine[];
+  nextPageDocumentLines?: readonly ReaderSelectionLine[];
 };
 
 type ReaderTextAnnotation = {
@@ -67,7 +69,12 @@ type ReaderTextAnnotation = {
 };
 
 type ResolvedReaderSelectionLayout =
-  | { kind: "singlePage"; text: string; lines: readonly ReaderSelectionLine[] }
+  | {
+      kind: "singlePage";
+      text: string;
+      lines: readonly ReaderSelectionLine[];
+      documentLines?: readonly ReaderSelectionLine[];
+    }
   | ({ kind: "crossPage" } & ReaderSelectionLayout);
 
 export function normalizeReaderAnnotationSelection(
@@ -78,7 +85,11 @@ export function normalizeReaderAnnotationSelection(
   if (!layout) return normalizeReaderSelection(annotation.text);
   if (layout.kind === "singlePage") {
     return normalizeReaderSelection(
-      removeEmbeddedCrossColumnObject(layout.text, layout.lines),
+      removeEmbeddedCrossColumnObject(
+        layout.text,
+        layout.lines,
+        layout.documentLines,
+      ),
     );
   }
   return normalizeReaderSelection(annotation.text, layout);
@@ -122,7 +133,12 @@ function removeVerifiedCrossPageArtifacts(
   const expected = `${layout.firstPageText} ${layout.nextPageText}`;
   if (value !== expected) return value;
   const firstPageText = removeTrailingArxivMarginLabel(
-    layout.firstPageText,
+    removeTrailingRepeatedPageFurniture(
+      layout.firstPageText,
+      layout.firstPageLines,
+      layout.firstPageDocumentLines,
+      layout.nextPageDocumentLines,
+    ),
     layout.firstPageLines,
   );
   const nextPageText = removeLeadingCrossPageObject(
@@ -131,6 +147,112 @@ function removeVerifiedCrossPageArtifacts(
     layout.firstPageLines,
   );
   return `${firstPageText} ${nextPageText}`;
+}
+
+function removeTrailingRepeatedPageFurniture(
+  value: string,
+  lines: readonly ReaderSelectionLine[] | undefined,
+  firstPageDocumentLines: readonly ReaderSelectionLine[] | undefined,
+  nextPageDocumentLines: readonly ReaderSelectionLine[] | undefined,
+): string {
+  const contentLines = lines?.filter(({ text }) => text.trim());
+  if (
+    !contentLines ||
+    contentLines.length < 2 ||
+    !firstPageDocumentLines?.length ||
+    !nextPageDocumentLines?.length
+  ) {
+    return value;
+  }
+  let furnitureStart = contentLines.length;
+  for (let index = contentLines.length - 1; index > 0; index -= 1) {
+    if (
+      !isRepeatedPageBoundaryLine(
+        contentLines[index],
+        firstPageDocumentLines,
+        nextPageDocumentLines,
+      )
+    ) {
+      break;
+    }
+    furnitureStart = index;
+  }
+  if (furnitureStart === contentLines.length) return value;
+
+  const retainedEnd = matchExactLinePrefix(
+    value,
+    contentLines.slice(0, furnitureStart),
+  );
+  const fullEnd = matchExactLinePrefix(value, contentLines);
+  if (
+    retainedEnd === undefined ||
+    fullEnd !== value.length ||
+    !/^\s/u.test(value.slice(retainedEnd))
+  ) {
+    return value;
+  }
+  return value.slice(0, retainedEnd).trimEnd();
+}
+
+function isRepeatedPageBoundaryLine(
+  candidate: ReaderSelectionLine,
+  firstPageLines: readonly ReaderSelectionLine[],
+  nextPageLines: readonly ReaderSelectionLine[],
+): boolean {
+  if (!isPageBoundaryLine(candidate, firstPageLines)) return false;
+  const contentLines = nextPageLines.filter(({ text }) => text.trim());
+  if (contentLines.length < 2) return false;
+
+  const candidateText = candidate.text.trim();
+  const candidateHeight = Math.abs(candidate.rect[3] - candidate.rect[1]);
+  const candidateCenter = (candidate.rect[1] + candidate.rect[3]) / 2;
+  return contentLines.some((line) => {
+    const height = Math.abs(line.rect[3] - line.rect[1]);
+    const center = (line.rect[1] + line.rect[3]) / 2;
+    return (
+      line.text.trim() === candidateText &&
+      candidateHeight > 0 &&
+      height > 0 &&
+      Math.abs(candidateHeight - height) <=
+        Math.max(candidateHeight * 0.08, 0.25) &&
+      Math.abs(candidateCenter - center) <= Math.max(candidateHeight, height) &&
+      isPageBoundaryLine(line, nextPageLines)
+    );
+  });
+}
+
+function isPageBoundaryLine(
+  candidate: ReaderSelectionLine,
+  pageLines: readonly ReaderSelectionLine[],
+): boolean {
+  const bounds = pageVerticalBounds(pageLines);
+  if (!bounds) return false;
+  const center = (candidate.rect[1] + candidate.rect[3]) / 2;
+  const boundaryBand = (bounds.top - bounds.bottom) * 0.12;
+  return (
+    center <= bounds.bottom + boundaryBand ||
+    center >= bounds.top - boundaryBand
+  );
+}
+
+function isPageBottomLine(
+  candidate: ReaderSelectionLine,
+  pageLines: readonly ReaderSelectionLine[],
+): boolean {
+  const bounds = pageVerticalBounds(pageLines);
+  if (!bounds) return false;
+  const center = (candidate.rect[1] + candidate.rect[3]) / 2;
+  return center <= bounds.bottom + (bounds.top - bounds.bottom) * 0.12;
+}
+
+function pageVerticalBounds(
+  pageLines: readonly ReaderSelectionLine[],
+): { bottom: number; top: number } | undefined {
+  const contentLines = pageLines.filter(({ text }) => text.trim());
+  if (contentLines.length < 2) return undefined;
+  const bottom = Math.min(...contentLines.map(({ rect }) => rect[1]));
+  const top = Math.max(...contentLines.map(({ rect }) => rect[3]));
+  return top > bottom ? { bottom, top } : undefined;
 }
 
 function removeTrailingArxivMarginLabel(
@@ -250,6 +372,7 @@ function startsVerifiedCrossPageBodyBlock(
 function removeEmbeddedCrossColumnObject(
   value: string,
   lines: readonly ReaderSelectionLine[],
+  documentLines?: readonly ReaderSelectionLine[],
 ): string {
   if (lines.length < 3) return value;
   const lineHeight = median(
@@ -265,7 +388,10 @@ function removeEmbeddedCrossColumnObject(
     if (!isForwardColumnWrap(lines[start - 1], lines[start], minimumGap)) {
       continue;
     }
-    const footnoteStart = findVerifiedFootnoteStart(lines.slice(0, start));
+    const footnoteStart = findVerifiedFootnoteStart(
+      lines.slice(0, start),
+      documentLines,
+    );
     const columnLines = lines.slice(start);
     const captionStart = findLastConsecutiveCaptionBlockStart(columnLines);
     if (captionStart < 0) {
@@ -283,17 +409,21 @@ function removeEmbeddedCrossColumnObject(
       captionEnd,
       minimumGap,
     );
-    if (objectEnd < captionEnd || objectEnd >= columnLines.length - 1) continue;
+    if (objectEnd < captionEnd || objectEnd >= columnLines.length - 1) {
+      if (footnoteStart < 0) continue;
+      return removeExactLineRange(value, lines, footnoteStart, start - 1);
+    }
     if (
       containsLeadingSemanticContent(leadingLines) ||
       formsAlignedProseContinuation(
-        lines[start - 1],
+        lines[(footnoteStart >= 0 ? footnoteStart : start) - 1],
         leadingLines,
         columnLines[objectEnd + 1],
         minimumGap,
       )
     ) {
-      continue;
+      if (footnoteStart < 0) continue;
+      return removeExactLineRange(value, lines, footnoteStart, start - 1);
     }
 
     const absoluteEnd = start + objectEnd;
@@ -309,36 +439,71 @@ function removeEmbeddedCrossColumnObject(
 
 function findVerifiedFootnoteStart(
   lines: readonly ReaderSelectionLine[],
+  documentLines: readonly ReaderSelectionLine[] | undefined,
 ): number {
-  if (lines.length < 3) return -1;
-  const markerIndex = lines.findLastIndex(
-    ({ text }, index) => index > 0 && /^\d{1,3}$/u.test(text.trim()),
-  );
-  if (markerIndex < 1 || markerIndex >= lines.length - 1) return -1;
-
-  const previous = lines[markerIndex - 1];
-  const marker = lines[markerIndex];
-  const firstTextLine = lines[markerIndex + 1];
-  const previousHeight = Math.abs(previous.rect[3] - previous.rect[1]);
-  const markerHeight = Math.abs(marker.rect[3] - marker.rect[1]);
-  const footnoteLines = lines.slice(markerIndex + 1);
-  if (
-    !previousHeight ||
-    !markerHeight ||
-    markerHeight >= previousHeight * 0.8 ||
-    previous.rect[1] <= marker.rect[3] ||
-    firstTextLine.rect[0] < marker.rect[2] ||
-    firstTextLine.rect[0] - marker.rect[2] > previousHeight ||
-    Math.min(marker.rect[3], firstTextLine.rect[3]) <=
-      Math.max(marker.rect[1], firstTextLine.rect[1]) ||
-    footnoteLines.some(
-      ({ rect }) => Math.abs(rect[3] - rect[1]) >= previousHeight * 0.9,
-    )
-  ) {
-    return -1;
+  if (lines.length < 2 || !documentLines?.length) return -1;
+  for (let start = 1; start < lines.length; start += 1) {
+    const previous = lines[start - 1];
+    const previousHeight = lineHeight(previous);
+    const footnoteLines = lines.slice(start);
+    if (
+      !previousHeight ||
+      !isPageBottomLine(footnoteLines.at(-1)!, documentLines) ||
+      !hasDistinctBlockSeparation(previous, footnoteLines) ||
+      footnoteLines.some(
+        (line) =>
+          !line.text.trim() ||
+          !lineHeight(line) ||
+          lineHeight(line) >= previousHeight * 0.9,
+      ) ||
+      footnoteLines.some(
+        (line, index) =>
+          index > 0 &&
+          !areContinuousFootnoteLines(
+            footnoteLines[index - 1],
+            line,
+            previousHeight,
+          ),
+      )
+    ) {
+      continue;
+    }
+    return start;
   }
-  const text = footnoteLines.map((line) => line.text.trim()).join(" ");
-  return /\p{L}.*\s+\p{L}/u.test(text) ? markerIndex : -1;
+  return -1;
+}
+
+function hasDistinctBlockSeparation(
+  previous: ReaderSelectionLine,
+  block: readonly ReaderSelectionLine[],
+): boolean {
+  if (block.length < 2) return false;
+  const separation = previous.rect[1] - block[0].rect[3];
+  const blockLineHeight = median(block.map(lineHeight));
+  const internalGap = median(
+    block
+      .slice(1)
+      .map((line, index) => Math.max(0, block[index].rect[1] - line.rect[3])),
+  );
+  return separation >= blockLineHeight && separation >= internalGap * 2;
+}
+
+function areContinuousFootnoteLines(
+  upper: ReaderSelectionLine,
+  lower: ReaderSelectionLine,
+  bodyLineHeight: number,
+): boolean {
+  const maximumOffset = bodyLineHeight * 2;
+  const verticalGap = upper.rect[1] - lower.rect[3];
+  return (
+    verticalGap >= -bodyLineHeight &&
+    verticalGap <= maximumOffset &&
+    Math.abs(upper.rect[0] - lower.rect[0]) <= maximumOffset
+  );
+}
+
+function lineHeight(line: ReaderSelectionLine): number {
+  return Math.abs(line.rect[3] - line.rect[1]);
 }
 
 function removeExactLineRange(
@@ -619,11 +784,16 @@ function resolveReaderSelectionLayout(
     ) {
       return undefined;
     }
-    const lines = extractSelectedRuntimeLines(
-      view?._pdfPages?.[firstPageIndex]?.chars,
-      range,
-    );
-    return lines ? { kind: "singlePage", text: range.text, lines } : undefined;
+    const chars = view?._pdfPages?.[firstPageIndex]?.chars;
+    const lines = extractSelectedRuntimeLines(chars, range);
+    return lines
+      ? {
+          kind: "singlePage",
+          text: range.text,
+          lines,
+          documentLines: extractRuntimePageLines(chars),
+        }
+      : undefined;
   }
   if (ranges.length !== 2 || !isRectList(position.nextPageRects)) {
     return undefined;
@@ -645,16 +815,21 @@ function resolveReaderSelectionLayout(
   const chars = view?._pdfPages?.[firstPageIndex + 1]?.chars;
   const nextPageLines = extractSelectedRuntimeLines(chars, nextRange);
   if (!nextPageLines) return undefined;
+  const nextPageDocumentLines = extractRuntimePageLines(chars);
+  const firstPageChars = view?._pdfPages?.[firstPageIndex]?.chars;
   const firstPageLines = extractSelectedRuntimeLines(
-    view?._pdfPages?.[firstPageIndex]?.chars,
+    firstPageChars,
     firstRange,
   );
+  const firstPageDocumentLines = extractRuntimePageLines(firstPageChars);
   return {
     kind: "crossPage",
     firstPageText: firstRange.text,
     firstPageLines,
+    firstPageDocumentLines,
     nextPageText: nextRange.text,
     nextPageLines,
+    nextPageDocumentLines,
   };
 }
 
@@ -704,6 +879,35 @@ function extractSelectedRuntimeLines(
   }));
 }
 
+function extractRuntimePageLines(
+  chars: unknown,
+): ReaderSelectionLine[] | undefined {
+  if (!Array.isArray(chars) || !chars.length) return undefined;
+  const lines: ReaderSelectionLine[] = [];
+  let currentLine: any[] = [];
+  for (const char of chars) {
+    if (!isRuntimePageChar(char)) return undefined;
+    currentLine.push(char);
+    if (!char.lineBreakAfter) continue;
+    lines.push(runtimePageLine(currentLine));
+    currentLine = [];
+  }
+  if (currentLine.length) lines.push(runtimePageLine(currentLine));
+  return lines;
+}
+
+function runtimePageLine(chars: readonly any[]): ReaderSelectionLine {
+  return {
+    text: runtimeCharsText(chars),
+    rect: [
+      Math.min(...chars.map((char) => char.inlineRect[0])),
+      Math.min(...chars.map((char) => char.inlineRect[1])),
+      Math.max(...chars.map((char) => char.inlineRect[2])),
+      Math.max(...chars.map((char) => char.inlineRect[3])),
+    ],
+  };
+}
+
 function runtimeCharsText(chars: readonly any[]): string {
   const text: string[] = [];
   for (const char of chars) {
@@ -727,18 +931,34 @@ function isRuntimeChar(value: unknown): value is {
   );
 }
 
+function isRuntimePageChar(value: unknown): value is {
+  c: string;
+  ignorable?: boolean;
+  spaceAfter?: boolean;
+  lineBreakAfter?: boolean;
+  paragraphBreakAfter?: boolean;
+  inlineRect: [number, number, number, number];
+} {
+  return isRuntimeChar(value) && isCoordinateRect((value as any).inlineRect);
+}
+
 function isRectList(
   value: unknown,
 ): value is [number, number, number, number][] {
   return (
     Array.isArray(value) &&
     value.length > 0 &&
-    value.every(
-      (rect) =>
-        Array.isArray(rect) &&
-        rect.length === 4 &&
-        rect.every((coordinate) => Number.isFinite(coordinate)),
-    )
+    value.every((rect) => isCoordinateRect(rect))
+  );
+}
+
+function isCoordinateRect(
+  value: unknown,
+): value is [number, number, number, number] {
+  return (
+    Array.isArray(value) &&
+    value.length === 4 &&
+    value.every((coordinate) => Number.isFinite(coordinate))
   );
 }
 

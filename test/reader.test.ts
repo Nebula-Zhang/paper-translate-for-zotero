@@ -12,6 +12,10 @@ function normalizeSinglePageReaderSelection(
     rect: readonly [number, number, number, number];
   }[],
   unspacedLineBreaks: ReadonlySet<number> = new Set(),
+  unselectedDocumentLines: readonly {
+    text: string;
+    rect: readonly [number, number, number, number];
+  }[] = [],
 ): string {
   const selectedText = selectedLines
     .map(({ text }, index) =>
@@ -21,14 +25,21 @@ function normalizeSinglePageReaderSelection(
     )
     .join("");
   const rects = selectedLines.map(({ rect }) => rect);
-  const chars = selectedLines.flatMap(({ text }, index) => [
+  const unselectedChars = unselectedDocumentLines.map(({ text, rect }) => ({
+    c: text,
+    inlineRect: rect,
+    lineBreakAfter: true,
+  }));
+  const selectedChars = selectedLines.flatMap(({ text, rect }, index) => [
     {
       c: text,
+      inlineRect: rect,
       spaceAfter:
         index < selectedLines.length - 1 && !unspacedLineBreaks.has(index),
     },
-    { c: "", ignorable: true, lineBreakAfter: true },
+    { c: "", inlineRect: rect, ignorable: true, lineBreakAfter: true },
   ]);
+  const chars = [...unselectedChars, ...selectedChars];
   const annotation = {
     text: selectedText,
     position: { pageIndex: 6, rects },
@@ -39,7 +50,7 @@ function normalizeSinglePageReaderSelection(
         _selectionRanges: [
           {
             pageIndex: 6,
-            anchorOffset: 0,
+            anchorOffset: unselectedChars.length,
             headOffset: chars.length,
             text: selectedText,
             position: { pageIndex: 6, rects },
@@ -781,7 +792,10 @@ test("removes a bottom footnote before embedded figures when a selection crosses
   ] as const;
 
   assert.equal(
-    normalizeSinglePageReaderSelection(selectedLines),
+    normalizeSinglePageReaderSelection(selectedLines, new Set(), [
+      { text: "Page heading", rect: [56, 700, 558, 712] },
+      { text: "1", rect: [300, 20, 306, 28] },
+    ]),
     "any information the reliability model might need (e.g., transistor toggling rate, integral of voltages).",
   );
 });
@@ -802,8 +816,220 @@ test("removes a bottom footnote from a direct cross-column selection", () => {
   ] as const;
 
   assert.equal(
-    normalizeSinglePageReaderSelection(selectedLines),
+    normalizeSinglePageReaderSelection(selectedLines, new Set(), [
+      { text: "Page heading", rect: [56, 700, 558, 712] },
+      { text: "1", rect: [300, 20, 306, 28] },
+    ]),
     "any information the reliability model might need additional data.",
+  );
+});
+
+test("removes an unnumbered author footnote from a direct cross-column selection", () => {
+  const selectedLines = [
+    {
+      text: "triangular matrix. Finally,",
+      rect: [220, 119, 301, 128],
+    },
+    {
+      text: "This work was supported by National Natural Science Foundation of China",
+      rect: [221, 82, 301, 89],
+    },
+    {
+      text: "under Grant 62122076 and Grant 62488101. X. Chen is with Institute of",
+      rect: [221, 73, 301, 80],
+    },
+    {
+      text: "Computing Technology, Chinese Academy of Sciences, Beijing 100190, China.",
+      rect: [221, 64, 301, 71],
+    },
+    {
+      text: "the solution x is obtained by solving two triangular systems, Ly = b and Ux = y.",
+      rect: [313, 419, 558, 428],
+    },
+  ] as const;
+
+  assert.equal(
+    normalizeSinglePageReaderSelection(selectedLines, new Set(), [
+      { text: "Page heading", rect: [56, 700, 558, 712] },
+      { text: "1", rect: [300, 20, 306, 28] },
+    ]),
+    "triangular matrix. Finally, the solution x is obtained by solving two triangular systems, Ly = b and Ux = y.",
+  );
+});
+
+test("removes a page-bottom footnote separated by less than one body line", () => {
+  const selectedLines = [
+    { text: "triangular matrix. Finally,", rect: [220, 119, 301, 128] },
+    {
+      text: "This work was supported by a research foundation under two grants.",
+      rect: [221, 104, 301, 111],
+    },
+    {
+      text: "The authors are with a research institute and can be contacted by email.",
+      rect: [221, 95, 301, 102],
+    },
+    {
+      text: "Their institutional address appears at the bottom of the page.",
+      rect: [221, 86, 301, 93],
+    },
+    {
+      text: "the solution x is obtained by solving two triangular systems.",
+      rect: [313, 419, 558, 428],
+    },
+  ] as const;
+
+  assert.equal(
+    normalizeSinglePageReaderSelection(selectedLines, new Set(), [
+      { text: "Page heading", rect: [56, 700, 558, 712] },
+      { text: "1", rect: [300, 20, 306, 28] },
+    ]),
+    "triangular matrix. Finally, the solution x is obtained by solving two triangular systems.",
+  );
+});
+
+test("keeps the same page-bottom block without relative visual separation", () => {
+  const selectedLines = [
+    { text: "triangular matrix. Finally,", rect: [220, 113, 301, 122] },
+    {
+      text: "This work was supported by a research foundation under two grants.",
+      rect: [221, 104, 301, 111],
+    },
+    {
+      text: "The authors are with a research institute and can be contacted by email.",
+      rect: [221, 95, 301, 102],
+    },
+    {
+      text: "Their institutional address appears at the bottom of the page.",
+      rect: [221, 86, 301, 93],
+    },
+    {
+      text: "the solution x is obtained by solving two triangular systems.",
+      rect: [313, 419, 558, 428],
+    },
+  ] as const;
+
+  assert.equal(
+    normalizeSinglePageReaderSelection(selectedLines, new Set(), [
+      { text: "Page heading", rect: [56, 700, 558, 712] },
+      { text: "1", rect: [300, 20, 306, 28] },
+    ]),
+    selectedLines.map(({ text }) => text).join(" "),
+  );
+});
+
+test("keeps one smaller page-bottom line without a block rhythm", () => {
+  const selectedLines = [
+    { text: "The first column ends here.", rect: [56, 119, 301, 128] },
+    { text: "A compact semantic line remains.", rect: [56, 82, 250, 89] },
+    { text: "The second column begins here.", rect: [313, 419, 558, 428] },
+  ] as const;
+
+  assert.equal(
+    normalizeSinglePageReaderSelection(selectedLines, new Set(), [
+      { text: "Page heading", rect: [56, 700, 558, 712] },
+      { text: "1", rect: [300, 20, 306, 28] },
+    ]),
+    selectedLines.map(({ text }) => text).join(" "),
+  );
+});
+
+test("keeps a smaller cross-column block away from the page boundary", () => {
+  const selectedLines = [
+    { text: "The first column ends here.", rect: [56, 350, 301, 362] },
+    { text: "A compact but semantic note", rect: [56, 315, 250, 323] },
+    { text: "continues on its next line.", rect: [56, 305, 210, 313] },
+    { text: "The second column begins here.", rect: [313, 650, 558, 662] },
+  ] as const;
+
+  assert.equal(
+    normalizeSinglePageReaderSelection(selectedLines, new Set(), [
+      { text: "Page heading", rect: [56, 700, 558, 712] },
+      { text: "1", rect: [300, 20, 306, 28] },
+    ]),
+    "The first column ends here. A compact but semantic note continues on its next line. The second column begins here.",
+  );
+});
+
+test("keeps smaller page-bottom prose without a visual body separation", () => {
+  const selectedLines = [
+    { text: "The first column ends here.", rect: [56, 110, 301, 122] },
+    { text: "A compact continuation remains", rect: [56, 100, 250, 108] },
+    { text: "part of the selected prose.", rect: [56, 90, 210, 98] },
+    { text: "The second column begins here.", rect: [313, 650, 558, 662] },
+  ] as const;
+
+  assert.equal(
+    normalizeSinglePageReaderSelection(selectedLines, new Set(), [
+      { text: "Page heading", rect: [56, 700, 558, 712] },
+      { text: "1", rect: [300, 20, 306, 28] },
+    ]),
+    "The first column ends here. A compact continuation remains part of the selected prose. The second column begins here.",
+  );
+});
+
+test("keeps a smaller semantic block at the page top", () => {
+  const selectedLines = [
+    { text: "A section opening remains selected.", rect: [56, 700, 301, 712] },
+    { text: "A compact summary starts here", rect: [56, 680, 250, 688] },
+    { text: "and remains semantic content.", rect: [56, 670, 220, 678] },
+    { text: "The second column continues.", rect: [313, 720, 558, 732] },
+  ] as const;
+
+  assert.equal(
+    normalizeSinglePageReaderSelection(selectedLines, new Set(), [
+      { text: "Page heading", rect: [56, 748, 558, 760] },
+      { text: "1", rect: [300, 20, 306, 28] },
+    ]),
+    "A section opening remains selected. A compact summary starts here and remains semantic content. The second column continues.",
+  );
+});
+
+test("removes a verified footnote independently of a later figure", () => {
+  const selectedLines = [
+    { text: "The first column ends here.", rect: [56, 119, 301, 128] },
+    { text: "An unnumbered compact note", rect: [56, 82, 250, 89] },
+    { text: "continues at the page bottom.", rect: [56, 73, 220, 80] },
+    { text: "The second column begins here.", rect: [313, 700, 558, 712] },
+    { text: "1 2 3 4 5", rect: [407, 600, 535, 612] },
+    {
+      text: "Fig. 7: Example of a later floating object.",
+      rect: [313, 560, 558, 572],
+    },
+    {
+      text: "The next paragraph remains selected.",
+      rect: [313, 480, 558, 492],
+    },
+  ] as const;
+
+  assert.equal(
+    normalizeSinglePageReaderSelection(selectedLines, new Set(), [
+      { text: "Page heading", rect: [56, 700, 558, 712] },
+      { text: "1", rect: [300, 20, 306, 28] },
+    ]),
+    "The first column ends here. The second column begins here. 1 2 3 4 5 Fig. 7: Example of a later floating object. The next paragraph remains selected.",
+  );
+});
+
+test("uses body text before a footnote to preserve a later prose fragment", () => {
+  const selectedLines = [
+    { text: "The first column ends here.", rect: [56, 119, 301, 128] },
+    { text: "An unnumbered compact note", rect: [56, 82, 250, 89] },
+    { text: "continues at the page bottom", rect: [56, 73, 220, 80] },
+    { text: "This partial continuation", rect: [313, 700, 558, 712] },
+    { text: "1 2 3 4 5", rect: [407, 600, 535, 612] },
+    {
+      text: "Fig. 7: Example of a later floating object.",
+      rect: [313, 560, 558, 572],
+    },
+    { text: "continues after the figure.", rect: [313, 480, 558, 492] },
+  ] as const;
+
+  assert.equal(
+    normalizeSinglePageReaderSelection(selectedLines, new Set(), [
+      { text: "Page heading", rect: [56, 700, 558, 712] },
+      { text: "1", rect: [300, 20, 306, 28] },
+    ]),
+    "The first column ends here. This partial continuation 1 2 3 4 5 Fig. 7: Example of a later floating object. continues after the figure.",
   );
 });
 
@@ -1184,6 +1410,267 @@ test("removes a rotated arXiv margin label from a cross-page annotation", () => 
 
   assert.equal(
     normalizeReaderAnnotationSelection(reader, annotation),
+    `${firstPageText} ${nextPageText}`,
+  );
+});
+
+test("removes an ACM journal footer at the verified first-page boundary", () => {
+  const firstPageLines = [
+    {
+      text: "The fill-in factor for circuit matrices stays remarkably low as compared to",
+      rect: [55, 88, 558, 108],
+    },
+    {
+      text: "matrices from other applications, even though the BTF form is exploited for",
+      rect: [55, 60, 558, 80],
+    },
+    {
+      text: "ACM Transactions on Mathematical Software, Vol. 37, No. 3, Article 36, Pub. date: September 2010.",
+      rect: [55, 37, 510, 49],
+    },
+  ] as const;
+  const nextPageLines = [
+    {
+      text: "all matrices in this experiment. Very few circuit matrices experience as much",
+      rect: [55, 700, 558, 720],
+    },
+    {
+      text: "fill-in as 2D or 3D meshes.",
+      rect: [55, 672, 280, 692],
+    },
+  ] as const;
+  const nextPageHeader = {
+    text: "Algorithm 907: KLU, A Direct Sparse Solver for Circuit Simulation Problems · 36: 5",
+    rect: [55, 744, 558, 760],
+  } as const;
+  const nextPageFooter = {
+    text: firstPageLines.at(-1)!.text,
+    rect: [110, 37, 565, 49],
+  } as const;
+  const firstPageText = firstPageLines.map(({ text }) => text).join(" ");
+  const nextPageText = nextPageLines.map(({ text }) => text).join(" ");
+  const nextPageRects = [
+    nextPageHeader.rect,
+    ...nextPageLines.map(({ rect }) => rect),
+  ];
+  const annotation = {
+    text: `${firstPageText} ${nextPageText}`,
+    position: {
+      pageIndex: 4,
+      rects: firstPageLines.map(({ rect }) => rect),
+      nextPageRects,
+    },
+  };
+  const reader = {
+    _internalReader: {
+      _lastView: {
+        _selectionRanges: [
+          {
+            pageIndex: 4,
+            anchorOffset: 0,
+            headOffset: firstPageLines.length,
+            text: firstPageText,
+            position: { pageIndex: 4, rects: annotation.position.rects },
+          },
+          {
+            pageIndex: 5,
+            anchorOffset: 0,
+            headOffset: nextPageLines.length + 1,
+            text: nextPageText,
+            position: {
+              pageIndex: 5,
+              rects: annotation.position.nextPageRects,
+            },
+          },
+        ],
+        _pdfPages: {
+          4: {
+            chars: firstPageLines.map(({ text, rect }) => ({
+              c: text,
+              inlineRect: rect,
+              lineBreakAfter: true,
+            })),
+          },
+          5: {
+            chars: [
+              {
+                c: nextPageHeader.text,
+                ignorable: true,
+                inlineRect: nextPageHeader.rect,
+                lineBreakAfter: true,
+              },
+              ...nextPageLines.map(({ text, rect }) => ({
+                c: text,
+                inlineRect: rect,
+                lineBreakAfter: true,
+              })),
+              {
+                c: nextPageFooter.text,
+                inlineRect: nextPageFooter.rect,
+                lineBreakAfter: true,
+              },
+            ],
+          },
+        },
+      },
+    },
+  };
+
+  assert.equal(
+    normalizeReaderAnnotationSelection(reader, annotation),
+    [...firstPageLines.slice(0, -1), ...nextPageLines]
+      .map(({ text }) => text)
+      .join(" "),
+  );
+});
+
+test("removes structurally verified cross-page furniture without publisher text", () => {
+  const firstPageText =
+    "The factorization argument continues through Unrelated running footer";
+  const nextPageText = "the next page without a semantic break.";
+
+  assert.equal(
+    normalizeReaderSelection(`${firstPageText} ${nextPageText}`, {
+      firstPageText,
+      firstPageLines: [
+        {
+          text: "The factorization argument continues through",
+          rect: [55, 60, 420, 80],
+        },
+        {
+          text: "Unrelated running footer",
+          rect: [55, 37, 260, 49],
+        },
+      ],
+      firstPageDocumentLines: [
+        {
+          text: "Earlier body text on the same page.",
+          rect: [55, 700, 420, 720],
+        },
+        {
+          text: "The factorization argument continues through",
+          rect: [55, 60, 420, 80],
+        },
+        {
+          text: "Unrelated running footer",
+          rect: [55, 37, 260, 49],
+        },
+      ],
+      nextPageText,
+      nextPageLines: [
+        {
+          text: nextPageText,
+          rect: [55, 700, 430, 720],
+        },
+      ],
+      nextPageDocumentLines: [
+        {
+          text: nextPageText,
+          rect: [55, 700, 430, 720],
+        },
+        {
+          text: "Unrelated running footer",
+          rect: [55, 37, 260, 49],
+        },
+      ],
+    }),
+    "The factorization argument continues through the next page without a semantic break.",
+  );
+});
+
+test("keeps small semantic text without repeated fixed page furniture evidence", () => {
+  const semanticLine = "A relevant compact annotation";
+  const firstPageText = `The factorization argument includes ${semanticLine}`;
+  const nextPageText = "the annotation before continuing on the next page.";
+  const layout = {
+    firstPageText,
+    firstPageLines: [
+      {
+        text: "The factorization argument includes",
+        rect: [55, 60, 420, 80] as const,
+      },
+      { text: semanticLine, rect: [55, 37, 260, 49] as const },
+    ],
+    firstPageDocumentLines: [
+      {
+        text: "Earlier body text on the same page.",
+        rect: [55, 700, 420, 720] as const,
+      },
+      {
+        text: "The factorization argument includes",
+        rect: [55, 60, 420, 80] as const,
+      },
+      { text: semanticLine, rect: [55, 37, 260, 49] as const },
+    ],
+    nextPageText,
+    nextPageLines: [{ text: nextPageText, rect: [55, 700, 430, 720] as const }],
+    nextPageDocumentLines: [
+      { text: nextPageText, rect: [55, 700, 430, 720] as const },
+      {
+        text: "Different running footer",
+        rect: [55, 37, 260, 49] as const,
+      },
+    ],
+  };
+
+  assert.equal(
+    normalizeReaderSelection(`${firstPageText} ${nextPageText}`, layout),
+    `${firstPageText} ${nextPageText}`,
+  );
+  assert.equal(
+    normalizeReaderSelection(`${firstPageText} ${nextPageText}`, {
+      ...layout,
+      nextPageDocumentLines: [
+        layout.nextPageLines[0],
+        { text: semanticLine, rect: [55, 300, 260, 312] },
+      ],
+    }),
+    `${firstPageText} ${nextPageText}`,
+  );
+});
+
+test("keeps ACM publication metadata outside the verified first-page tail", () => {
+  const footer =
+    "ACM Transactions on Mathematical Software, Vol. 37, No. 3, Article 36, Pub. date: September 2010.";
+  const firstPageText = `${footer} The bibliography discussion continues.`;
+  const nextPageText = "The next page compares the citation formats.";
+
+  assert.equal(
+    normalizeReaderSelection(`${firstPageText} ${nextPageText}`, {
+      firstPageText,
+      firstPageLines: [
+        { text: footer, rect: [55, 56, 510, 68] },
+        {
+          text: "The bibliography discussion continues.",
+          rect: [55, 500, 330, 520],
+        },
+      ],
+      firstPageDocumentLines: [
+        {
+          text: "Earlier body text on the same page.",
+          rect: [55, 700, 410, 720],
+        },
+        { text: footer, rect: [55, 56, 510, 68] },
+        {
+          text: "The bibliography discussion continues.",
+          rect: [55, 500, 330, 520],
+        },
+      ],
+      nextPageText,
+      nextPageLines: [
+        {
+          text: nextPageText,
+          rect: [55, 708, 410, 720],
+        },
+      ],
+      nextPageDocumentLines: [
+        {
+          text: nextPageText,
+          rect: [55, 708, 410, 720],
+        },
+        { text: footer, rect: [110, 56, 565, 68] },
+      ],
+    }),
     `${firstPageText} ${nextPageText}`,
   );
 });
