@@ -163,7 +163,9 @@ export function openModelPicker(params: {
   };
   confirm.addEventListener("click", () => {
     if (!selected.size) return;
-    const ids = [...selected];
+    const ids = params.models
+      .filter((model) => selected.has(model.id))
+      .map((model) => model.id);
     close();
     params.onConfirm(ids);
   });

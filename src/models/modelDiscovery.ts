@@ -6,11 +6,13 @@ import {
 } from "./protocols";
 import { buildApiHeaders, redactError } from "./openAICompatibleClient";
 import { withRequestDeadline } from "./requestLifetime";
+import { modelCreationTime, sortDiscoveredModels } from "./modelCatalogSort";
 
 export type DiscoveredModel = {
   id: string;
   name: string;
   outputModalities?: string[];
+  createdAt?: number;
 };
 const MAX_MODELS = 5000;
 const MAX_BYTES = 2 * 1024 * 1024;
@@ -111,10 +113,12 @@ export async function fetchProviderModels(
             }
             const id = entry.id.trim();
             const label = entry.display_name ?? entry.name;
+            const createdAt = modelCreationTime(entry);
             if (!models.has(id)) {
               models.set(id, {
                 id,
                 name: typeof label === "string" ? label.slice(0, 160) : "",
+                ...(createdAt === undefined ? {} : { createdAt }),
                 ...(Array.isArray(entry.output_modalities) &&
                 entry.output_modalities.length > 0 &&
                 entry.output_modalities.length <= 16 &&
@@ -147,9 +151,7 @@ export async function fetchProviderModels(
               throw new Error(
                 "服务商返回的模型列表为空，可手动添加 / Empty model list",
               );
-            return [...models.values()].sort((a, b) =>
-              a.id.localeCompare(b.id),
-            );
+            return sortDiscoveredModels([...models.values()]);
           }
           if (
             !catalog.paginated ||

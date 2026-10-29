@@ -6,7 +6,7 @@ pref-target-language = Target language (fixed to Chinese)
 pref-backend = AI providers
 pref-provider-add = ＋ Add provider
 
-pref-provider-description = Configure a connection and models for each provider. Open a card to edit.
+pref-provider-description = Open a card to configure its connection and models. Drafts are remembered automatically; save to apply them.
 pref-provider-group-label = Providers
 pref-settings-tabs =
     .aria-label = Plugin settings

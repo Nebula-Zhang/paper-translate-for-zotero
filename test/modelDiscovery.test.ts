@@ -37,7 +37,7 @@ test("preserves valid declared output modalities while ignoring malformed option
         ],
       }),
   });
-  assert.deepEqual(models, [
+  assert.deepEqual([...models].reverse(), [
     { id: "a", name: "", outputModalities: ["image"] },
     { id: "b", name: "", outputModalities: ["text", "audio"] },
     { id: "c", name: "" },
@@ -134,9 +134,9 @@ test("listing uses GET without generation, rejects redirects, sorts and deduplic
   });
   assert.equal(requests, 1);
   assert.deepEqual(models, [
-    { id: "embedding-model", name: "" },
-    { id: "model-a", name: "" },
     { id: "model-b", name: "Model B" },
+    { id: "model-a", name: "" },
+    { id: "embedding-model", name: "" },
   ]);
 });
 
@@ -171,7 +171,7 @@ test("Anthropic paginates using last_id while preserving gateway query parameter
   );
   assert.equal(page, 2);
   assert.equal(models.length, 2);
-  assert.equal(models[1].name, "Model B");
+  assert.equal(models.find((model) => model.id === "model-b")!.name, "Model B");
 });
 
 test("invalid endpoints, missing keys and Codex never send a discovery request", async () => {

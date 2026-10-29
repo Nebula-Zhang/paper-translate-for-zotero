@@ -22,6 +22,7 @@ export type FluentMessageId =
   | 'pref-provider-custom'
   | 'pref-provider-default-name'
   | 'pref-provider-description'
+  | 'pref-provider-draft-invalid'
   | 'pref-provider-effort'
   | 'pref-provider-endpoint'
   | 'pref-provider-group-label'

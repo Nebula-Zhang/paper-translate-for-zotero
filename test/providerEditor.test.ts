@@ -228,6 +228,7 @@ test("settings preset selection, custom editing, save, text test and image test 
       (control("pref-provider-api-base") as HTMLInputElement).readOnly,
       false,
     );
+    input("pref-provider-api-base", "https://example.test/v1/chat/completions");
     change("pref-provider-protocol", "responses");
     assert.match(
       doc.querySelector('[aria-live="polite"]')!.textContent!,

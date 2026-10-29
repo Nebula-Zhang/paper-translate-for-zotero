@@ -23,6 +23,7 @@ import {
 import { testModelImageConnection } from "../models/connectionTests";
 import { fetchProviderModels } from "../models/modelDiscovery";
 import { openModelPicker } from "./modelPicker";
+import { ProviderEditorDraft } from "../models/providerEditorDraft";
 
 export const PREFERENCES_PANE_ID = `${config.addonRef}-preferences`;
 const CONNECTION_TEST_TIMEOUT_MS = 30_000;
@@ -30,6 +31,10 @@ let preferencesRegistered = false;
 const connectionTestControllers = new Set<AbortController>();
 const discoveryControllers = new Map<HTMLElement, AbortController>();
 const modelPickers = new Map<HTMLElement, () => void>();
+const preferenceEditors = new Map<
+  Window,
+  { root: HTMLElement; dispose(): void }
+>();
 
 export async function registerPrefsWindow(): Promise<void> {
   if (preferencesRegistered) return;
@@ -45,6 +50,7 @@ export async function registerPrefsWindow(): Promise<void> {
 }
 
 export function unregisterPrefsWindow(): void {
+  for (const editor of preferenceEditors.values()) editor.dispose();
   cancelConnectionTests();
   stopModelDiscovery();
   if (!preferencesRegistered) return;
@@ -58,11 +64,28 @@ export function registerPrefsScripts(
 ): void {
   addon.data.prefs.window = window;
   const doc = window.document;
+  const root = requiredElement<HTMLElement>(
+    doc,
+    `zotero-prefpane-${config.addonRef}`,
+  );
+  const previousEditor = preferenceEditors.get(window);
+  if (previousEditor?.root === root) return;
+  previousEditor?.dispose();
+  const memory = new ProviderEditorDraft(
+    getModelProviderConfiguration().providers,
+  );
+  let drafts = memory.providers;
+  const openProviderIds = memory.openProviderIds;
+  const openModelIds = memory.openModelIds;
+  const remember = () => {
+    memory.providers = drafts;
+    memory.remember();
+  };
   bindSourceLanguage(doc);
-  bindPreferenceTabs(doc);
-  let drafts = cloneProviders(getModelProviderConfiguration().providers);
-  const openProviderIds = new Set<string>();
-  const openModelIds = new Set<string>();
+  bindPreferenceTabs(doc, memory.tab, (tab) => {
+    memory.tab = tab;
+    remember();
+  });
   ensureProviderStyles(doc);
 
   const render = () => {
@@ -74,6 +97,7 @@ export function registerPrefsScripts(
       drafts,
       openProviderIds,
       openModelIds,
+      memory,
       activeModelId: configuration.activeModelId,
       modelSelection,
       onDraftsChanged(next) {
@@ -81,7 +105,8 @@ export function registerPrefsScripts(
         render();
       },
       onSaved(saved, savedProviderId) {
-        drafts = cloneProviders(saved);
+        memory.acceptSaved(saved);
+        drafts = memory.providers;
         render();
         if (!savedProviderId) return;
         const savedCard = Array.from(doc.querySelectorAll("section"))
@@ -92,6 +117,7 @@ export function registerPrefsScripts(
         }
       },
     });
+    remember();
   };
 
   const add = requiredElement<HTMLButtonElement>(
@@ -99,25 +125,43 @@ export function registerPrefsScripts(
     `${config.addonRef}-add-provider`,
   );
   add.classList.add("pt-provider-add");
-  add.addEventListener("click", () => {
+  const addProvider = () => {
     const provider = createProviderGroup("openai_compatible");
     provider.name = nextProviderName(drafts);
     provider.models.push(createProviderModel());
     drafts = [...drafts, provider];
     openProviderIds.add(provider.id);
     render();
-  });
+  };
+  add.addEventListener("click", addProvider);
+  // Target handlers update fields before bubbling reaches the editor root.
+  root.addEventListener("input", remember);
+  root.addEventListener("change", remember);
+  root.addEventListener("click", remember);
   const unsubscribe = subscribeModelConfiguration(render);
-  window.addEventListener(
-    "unload",
-    () => {
-      unsubscribe();
-      cancelConnectionTests();
-      stopModelDiscovery();
-    },
-    { once: true },
-  );
+  let disposed = false;
+  const dispose = () => {
+    if (disposed) return;
+    disposed = true;
+    remember();
+    unsubscribe();
+    root.removeEventListener("input", remember);
+    root.removeEventListener("change", remember);
+    root.removeEventListener("click", remember);
+    add.removeEventListener("click", addProvider);
+    window.removeEventListener("unload", dispose);
+    preferenceEditors.delete(window);
+    cancelConnectionTests();
+    stopModelDiscovery();
+  };
+  preferenceEditors.set(window, { root, dispose });
+  window.addEventListener("unload", dispose, { once: true });
   render();
+  if (memory.invalidCache) {
+    const card = doc.querySelector(".pt-provider-card") as HTMLElement | null;
+    if (card)
+      showCardStatus(card, getString("pref-provider-draft-invalid"), true);
+  }
 }
 
 type ProviderCardRenderParams = {
@@ -126,6 +170,7 @@ type ProviderCardRenderParams = {
   activeModelId: string;
   openProviderIds: Set<string>;
   openModelIds: Set<string>;
+  memory: ProviderEditorDraft;
   modelSelection: ModelSelectionActions;
   onDraftsChanged(providers: ModelProviderGroup[]): void;
   onSaved(providers: ModelProviderGroup[], savedProviderId?: string): void;
@@ -186,17 +231,7 @@ function createProviderCard(
   );
   auth.select.addEventListener("change", () => {
     const next = auth.select.value as ModelAuthMode;
-    provider.authMode = next;
-    provider.apiBase = "";
-    provider.apiKey = "";
-    provider.presetId = "custom";
-    provider.protocol = "chat_completions";
-    provider.workspaceId = "";
-    provider.anthropicVersion = "2023-06-01";
-    provider.maxTokens = 8192;
-    for (const model of provider.models) {
-      model.effort = next === "codex_auth" ? "medium" : "";
-    }
+    params.memory.switchAuth(provider, next);
     params.onDraftsChanged([...params.drafts]);
   });
 
@@ -215,24 +250,7 @@ function createProviderCard(
       provider.presetId || "custom",
     );
     preset.select.addEventListener("change", () => {
-      const selected = PROVIDER_PRESETS.find(
-        (entry) => entry.id === preset.select.value,
-      );
-      if (selected) {
-        let oldHost = "";
-        try {
-          oldHost = new URL(provider.apiBase).host;
-        } catch {
-          /* An empty draft has no host. */
-        }
-        if (oldHost !== new URL(selected.url).host) {
-          provider.apiKey = "";
-          provider.workspaceId = "";
-        }
-        provider.apiBase = selected.url;
-        provider.protocol = selected.protocol;
-      }
-      provider.presetId = selected?.id || "custom";
+      params.memory.switchPreset(provider, preset.select.value);
       params.onDraftsChanged([...params.drafts]);
     });
     const protocol = labeledSelect(
@@ -711,13 +729,6 @@ function cancelConnectionTests(): void {
   connectionTestControllers.clear();
 }
 
-function cloneProviders(providers: ModelProviderGroup[]): ModelProviderGroup[] {
-  return providers.map((provider) => ({
-    ...provider,
-    models: provider.models.map((model) => ({ ...model })),
-  }));
-}
-
 function nextProviderName(providers: ModelProviderGroup[]): string {
   const existing = new Set(providers.map((provider) => provider.name.trim()));
   for (let index = 0; index < 26; index += 1) {
@@ -930,7 +941,11 @@ function updateProviderHeader(
   }
 }
 
-function bindPreferenceTabs(doc: Document): void {
+function bindPreferenceTabs(
+  doc: Document,
+  initial: number,
+  onChange: (tab: number) => void,
+): void {
   const tabs = ["providers", "translation"].map(
     (id) =>
       doc.getElementById(
@@ -948,6 +963,7 @@ function bindPreferenceTabs(doc: Document): void {
       if (panel) panel.hidden = index !== selected;
     });
     if (focus) tabs[selected]!.focus();
+    onChange(selected);
   };
   tabs.forEach((tab, index) => {
     tab!.addEventListener("click", () => selectTab(index));
@@ -967,5 +983,5 @@ function bindPreferenceTabs(doc: Document): void {
       selectTab(next, true);
     });
   });
-  selectTab(0);
+  selectTab(initial);
 }
