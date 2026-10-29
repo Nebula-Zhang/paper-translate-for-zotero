@@ -33,7 +33,7 @@ export async function registerPrefsWindow(): Promise<void> {
     pluginID: config.addonID,
     id: PREFERENCES_PANE_ID,
     src: rootURI + "chrome/content/preferences.xhtml",
-    label: "paper-translate-for-zotero",
+    label: config.addonName,
     image: `chrome://${config.addonRef}/content/icons/section-20.png`,
     helpURL: homepage,
   });

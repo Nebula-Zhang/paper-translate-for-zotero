@@ -17,7 +17,7 @@ test("registers the exact plugin name and a correctly sized settings icon", asyn
 
   await registerPrefsWindow();
 
-  assert.equal(options.label, "paper-translate-for-zotero");
+  assert.equal(options.label, "Paper Translate for Zotero");
   assert.equal(options.id, "papertranslateforzotero-preferences");
   assert.match(options.image, /section-20\.png$/);
 });

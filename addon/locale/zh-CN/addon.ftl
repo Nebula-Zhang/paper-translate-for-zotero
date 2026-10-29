@@ -1,4 +1,4 @@
-pref-title=paper-translate-for-zotero
+pref-title=Paper Translate for Zotero
 pref-codex-testing=正在测试...
 pref-codex-success=连接成功
 pref-codex-failed=连接失败
