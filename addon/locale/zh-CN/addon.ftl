@@ -78,9 +78,19 @@ sidebar-image-error-detail=图片取词失败：{ $detail }
 service-errorPrefix=[请求错误]
 service-paper-context=论文上下文翻译
 
-pref-provider-preset=服务商 / URL 预设
+pref-provider-preset=服务商
 pref-provider-custom=自定义服务
 pref-provider-protocol=API 协议
 pref-provider-endpoint=最终请求地址
 pref-provider-timeout=请求超时（秒，1–3600）
 pref-provider-image-test=图片测试
+
+pref-provider-connection=连接
+pref-provider-preset-hint=预设使用 { $protocol } 协议，切换到“自定义服务”可编辑 URL。
+pref-provider-model-options=模型选项
+pref-provider-effort=推理强度
+pref-provider-login=登录
+pref-provider-model-unset=未填写模型
+pref-provider-codex-auth=Codex 登录
+pref-provider-key-auth=API 密钥
+pref-provider-not-current=未选择为当前模型

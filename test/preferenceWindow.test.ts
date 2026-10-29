@@ -86,5 +86,4 @@ test("keeps dynamic provider controls localized and compact", async () => {
   assert.match(script, /nextProviderName/u);
   assert.match(addonLocales[0], /^pref-provider-save\s*=\s*保存$/mu);
   assert.match(script, /getString\("pref-codex-test"\)/u);
-  assert.match(script, /row\.append\(select, test, imageTest, remove\)/u);
 });

@@ -54,7 +54,11 @@ export function registerPrefsScripts(
   addon.data.prefs.window = window;
   const doc = window.document;
   bindSourceLanguage(doc);
+  bindPreferenceTabs(doc);
   let drafts = cloneProviders(getModelProviderConfiguration().providers);
+  const openProviderIds = new Set<string>();
+  const openModelIds = new Set<string>();
+  ensureProviderStyles(doc);
 
   const render = () => {
     cancelConnectionTests();
@@ -62,6 +66,8 @@ export function registerPrefsScripts(
     renderProviderCards({
       doc,
       drafts,
+      openProviderIds,
+      openModelIds,
       activeModelId: configuration.activeModelId,
       modelSelection,
       onDraftsChanged(next) {
@@ -86,11 +92,13 @@ export function registerPrefsScripts(
     doc,
     `${config.addonRef}-add-provider`,
   );
+  add.classList.add("pt-provider-add");
   add.addEventListener("click", () => {
     const provider = createProviderGroup("openai_compatible");
     provider.name = nextProviderName(drafts);
     provider.models.push(createProviderModel());
     drafts = [...drafts, provider];
+    openProviderIds.add(provider.id);
     render();
   });
   const unsubscribe = subscribeModelConfiguration(render);
@@ -109,6 +117,8 @@ type ProviderCardRenderParams = {
   doc: Document;
   drafts: ModelProviderGroup[];
   activeModelId: string;
+  openProviderIds: Set<string>;
+  openModelIds: Set<string>;
   modelSelection: ModelSelectionActions;
   onDraftsChanged(providers: ModelProviderGroup[]): void;
   onSaved(providers: ModelProviderGroup[], savedProviderId?: string): void;
@@ -119,11 +129,7 @@ function renderProviderCards(params: ProviderCardRenderParams): void {
     params.doc,
     `${config.addonRef}-model-providers`,
   );
-  Object.assign(root.style, {
-    display: "flex",
-    flexDirection: "column",
-    gap: "12px",
-  });
+  root.classList.add("pt-provider-list");
   root.replaceChildren(
     ...params.drafts.map((provider, providerIndex) =>
       createProviderCard(params, provider, providerIndex),
@@ -138,60 +144,29 @@ function createProviderCard(
 ): HTMLElement {
   const doc = params.doc;
   const card = htmlElement(doc, "section");
-  Object.assign(card.style, {
-    padding: "10px",
-    border: "1px solid var(--fill-quinary, #d2d2d2)",
-    borderRadius: "8px",
-    background: "var(--material-background, #fff)",
+  card.className = "pt-provider-card";
+  card.dataset.providerIndex = String(providerIndex);
+  card.dataset.providerId = provider.id;
+  const header = createProviderHeader(params, card, provider);
+  const body = htmlElement(doc, "div");
+  body.className = "pt-provider-body";
+  body.id = `${config.addonRef}-provider-${provider.id}-body`;
+  body.hidden = !params.openProviderIds.has(provider.id);
+  header.querySelector("button")!.setAttribute("aria-controls", body.id);
+  const connection = htmlElement(doc, "h3");
+  connection.className = "pt-provider-section-title";
+  connection.textContent = getString("pref-provider-connection");
+  const name = labeledInput(
+    doc,
+    getString("pref-provider-name"),
+    provider.name,
+  );
+  name.input.placeholder = getString("pref-provider-unnamed");
+  name.input.addEventListener("input", () => {
+    provider.name = name.input.value;
+    updateProviderHeader(card, provider, params.activeModelId);
   });
-
-  const header = htmlElement(doc, "div");
-  Object.assign(header.style, {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    marginBottom: "10px",
-  });
-  const name = htmlElement(doc, "input");
-  name.type = "text";
-  name.value = provider.name;
-  name.placeholder = getString("pref-provider-unnamed");
-  name.setAttribute("aria-label", getString("pref-provider-name"));
-  Object.assign(name.style, {
-    boxSizing: "border-box",
-    flex: "1",
-    minWidth: "0",
-    padding: "5px 8px",
-    fontWeight: "600",
-  });
-  name.addEventListener("input", () => {
-    provider.name = name.value;
-  });
-  const removeProvider = actionButton(doc, "×");
-  removeProvider.title = getString("pref-provider-remove");
-  removeProvider.setAttribute("aria-label", getString("pref-provider-remove"));
-  removeProvider.addEventListener("click", () => {
-    if (provider.models.some((model) => model.id === params.activeModelId)) {
-      showCardStatus(
-        card,
-        getString("pref-provider-active-remove-error"),
-        true,
-      );
-      return;
-    }
-    const next = params.drafts.filter((entry) => entry.id !== provider.id);
-    const stored = getModelProviderConfiguration();
-    if (stored.providers.some((entry) => entry.id === provider.id)) {
-      const saved = params.modelSelection.saveModelProviderConfiguration(
-        next,
-        stored.activeModelId,
-      );
-      params.onSaved(saved.providers);
-      return;
-    }
-    params.onDraftsChanged(next);
-  });
-  header.append(name, removeProvider);
+  body.append(connection, name.wrap);
 
   const auth = labeledSelect(
     doc,
@@ -218,7 +193,7 @@ function createProviderCard(
     params.onDraftsChanged([...params.drafts]);
   });
 
-  card.append(header, auth.wrap);
+  body.append(auth.wrap);
   if (provider.authMode === "openai_compatible") {
     const preset = labeledSelect(
       doc,
@@ -259,12 +234,14 @@ function createProviderCard(
       API_PROTOCOLS,
       provider.protocol ?? "chat_completions",
     );
-    protocol.select.disabled = (provider.presetId || "custom") !== "custom";
+    const custom = (provider.presetId || "custom") === "custom";
+    protocol.select.disabled = !custom;
+    protocol.wrap.hidden = !custom;
     protocol.select.addEventListener("change", () => {
       provider.protocol = protocol.select.value as ApiProtocol;
       params.onDraftsChanged([...params.drafts]);
     });
-    card.append(preset.wrap, protocol.wrap);
+    body.append(preset.wrap, protocol.wrap);
     const apiBase = labeledInput(
       doc,
       getString("pref-provider-api-base"),
@@ -273,12 +250,26 @@ function createProviderCard(
     apiBase.input.placeholder = "https://api.example.com/v1";
     apiBase.input.readOnly = (provider.presetId || "custom") !== "custom";
     const preview = htmlElement(doc, "p");
-    preview.style.overflowWrap = "anywhere";
-    preview.style.fontSize = "0.9em";
+    preview.className = "pt-provider-hint";
     preview.setAttribute("aria-live", "polite");
     const updatePreview = () => {
       try {
-        preview.textContent = `${getString("pref-provider-endpoint")}: ${endpointPreview(resolveApiEndpoint(provider.apiBase, provider.protocol ?? "chat_completions"))}`;
+        const endpoint = endpointPreview(
+          resolveApiEndpoint(
+            provider.apiBase,
+            provider.protocol ?? "chat_completions",
+          ),
+        );
+        preview.textContent = custom
+          ? `${getString("pref-provider-endpoint")}: ${endpoint}`
+          : getString("pref-provider-preset-hint", {
+              args: {
+                protocol:
+                  API_PROTOCOLS.find(
+                    ([id]) => id === (provider.protocol ?? "chat_completions"),
+                  )?.[1] || "",
+              },
+            });
         preview.style.color = "";
       } catch (error) {
         preview.textContent = modelErrorMessage(error);
@@ -301,7 +292,8 @@ function createProviderCard(
       provider.apiKey = apiKey.input.value;
     });
     updatePreview();
-    card.append(apiBase.wrap, preview, apiKey.wrap);
+    apiBase.wrap.append(preview);
+    body.append(apiBase.wrap, apiKey.wrap);
   }
   const timeout = labeledInput(
     doc,
@@ -314,20 +306,17 @@ function createProviderCard(
   timeout.input.addEventListener("input", () => {
     provider.timeoutSeconds = Number(timeout.input.value);
   });
-  card.append(timeout.wrap);
+  body.append(timeout.wrap);
 
+  const models = htmlElement(doc, "div");
+  models.className = "pt-provider-models";
   const modelHeading = htmlElement(doc, "div");
-  Object.assign(modelHeading.style, {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    marginTop: "10px",
-    marginBottom: "6px",
-  });
+  modelHeading.className = "pt-provider-model-heading";
   const modelTitle = htmlElement(doc, "strong");
   modelTitle.textContent = getString("pref-provider-models");
-  modelTitle.style.flex = "1";
+  modelTitle.className = "pt-provider-section-title";
   const addModel = actionButton(doc, "+");
+  addModel.classList.add("pt-icon-button", "pt-add-model");
   addModel.title = getString("pref-provider-add-model");
   addModel.setAttribute("aria-label", getString("pref-provider-add-model"));
   addModel.addEventListener("click", () => {
@@ -335,20 +324,17 @@ function createProviderCard(
     params.onDraftsChanged([...params.drafts]);
   });
   modelHeading.append(modelTitle, addModel);
-  card.append(modelHeading);
+  models.append(modelHeading);
 
   for (const model of provider.models) {
-    card.append(createModelRow(params, card, provider, model));
+    models.append(createModelRow(params, card, provider, model));
   }
 
+  body.append(models);
   const footer = htmlElement(doc, "div");
-  Object.assign(footer.style, {
-    display: "flex",
-    alignItems: "center",
-    gap: "8px",
-    marginTop: "10px",
-  });
+  footer.className = "pt-provider-footer";
   const save = actionButton(doc, getString("pref-provider-save"));
+  save.classList.add("pt-save-button");
   save.addEventListener("click", () => {
     try {
       const stored = getModelProviderConfiguration();
@@ -364,13 +350,41 @@ function createProviderCard(
   const status = htmlElement(doc, "span");
   status.className = `${config.addonRef}-provider-status`;
   status.hidden = true;
-  Object.assign(status.style, {
-    flex: "1",
-    overflowWrap: "anywhere",
-    fontSize: "0.9em",
+  status.classList.add("pt-provider-status");
+  status.setAttribute("role", "status");
+  const removeProvider = actionButton(doc, getString("pref-provider-remove"));
+  removeProvider.classList.add("pt-danger-button");
+  removeProvider.addEventListener("click", () => {
+    if (provider.models.some((model) => model.id === params.activeModelId)) {
+      showCardStatus(
+        card,
+        getString("pref-provider-active-remove-error"),
+        true,
+      );
+      return;
+    }
+    try {
+      const next = params.drafts.filter((entry) => entry.id !== provider.id);
+      const stored = getModelProviderConfiguration();
+      if (stored.providers.some((entry) => entry.id === provider.id)) {
+        const saved = params.modelSelection.saveModelProviderConfiguration(
+          next,
+          stored.activeModelId,
+        );
+        params.openProviderIds.delete(provider.id);
+        params.onSaved(saved.providers);
+      } else {
+        params.openProviderIds.delete(provider.id);
+        params.onDraftsChanged(next);
+      }
+    } catch (error) {
+      showCardStatus(card, modelErrorMessage(error), true);
+    }
   });
-  footer.append(save, status);
-  card.append(footer);
+  footer.append(save, removeProvider);
+  body.append(status, footer);
+  card.append(header, body);
+  updateProviderHeader(card, provider, params.activeModelId);
   card.dataset.providerIndex = String(providerIndex);
   card.dataset.providerId = provider.id;
   return card;
@@ -384,25 +398,25 @@ function createModelRow(
 ): HTMLElement {
   const doc = params.doc;
   const row = htmlElement(doc, "div");
-  Object.assign(row.style, {
-    display: "flex",
-    flexWrap: "wrap",
-    gap: "6px",
-    alignItems: "center",
-    marginBottom: "6px",
-  });
+  row.className = "pt-provider-model-row";
   const modelInput = htmlElement(doc, "input");
   modelInput.type = "text";
   modelInput.value = model.model;
   modelInput.placeholder = getString("pref-provider-model-id");
   modelInput.setAttribute("aria-label", getString("pref-provider-model-id"));
   applyInputStyle(modelInput);
-  modelInput.style.flex = "1";
-  modelInput.style.minWidth = "120px";
+  modelInput.classList.add("pt-model-input");
   modelInput.addEventListener("input", () => {
     model.model = modelInput.value;
+    updateProviderHeader(card, provider, params.activeModelId);
   });
   row.append(modelInput);
+  const modelWrap = htmlElement(doc, "div");
+  modelWrap.className = "pt-provider-model";
+  const settings = htmlElement(doc, "div");
+  settings.className = "pt-model-controls";
+  settings.id = `${config.addonRef}-model-${model.id}-controls`;
+  settings.hidden = !params.openModelIds.has(model.id);
 
   if (provider.authMode === "codex_auth") {
     const effort = htmlElement(doc, "select");
@@ -418,7 +432,8 @@ function createModelRow(
     effort.addEventListener("change", () => {
       model.effort = effort.value;
     });
-    row.append(effort);
+    effort.setAttribute("aria-label", getString("pref-provider-effort"));
+    settings.append(effort);
   }
 
   const select = actionButton(
@@ -446,7 +461,14 @@ function createModelRow(
   test.addEventListener("click", () => {
     void testDraftModel(card, provider, model, test);
   });
-  const imageTest = actionButton(doc, getString("pref-provider-image-test"));
+  const imageTest = actionButton(doc, "");
+  const imageIcon = htmlElement(doc, "img");
+  imageIcon.src = `chrome://${config.addonRef}/content/icons/action-image.svg`;
+  imageIcon.alt = "";
+  imageTest.append(imageIcon);
+  imageTest.classList.add("pt-icon-button");
+  imageTest.title = getString("pref-provider-image-test");
+  imageTest.setAttribute("aria-label", getString("pref-provider-image-test"));
   imageTest.addEventListener("click", () => {
     void testDraftModel(card, provider, model, imageTest, "image");
   });
@@ -466,8 +488,22 @@ function createModelRow(
     provider.models = provider.models.filter((entry) => entry.id !== model.id);
     params.onDraftsChanged([...params.drafts]);
   });
-  row.append(select, test, imageTest, remove);
-  return row;
+  settings.append(select, remove);
+  const options = actionButton(doc, "⚙");
+  options.classList.add("pt-icon-button", "pt-model-options");
+  options.title = getString("pref-provider-model-options");
+  options.setAttribute("aria-label", getString("pref-provider-model-options"));
+  options.setAttribute("aria-controls", settings.id);
+  options.setAttribute("aria-expanded", String(!settings.hidden));
+  options.addEventListener("click", () => {
+    settings.hidden = !settings.hidden;
+    if (settings.hidden) params.openModelIds.delete(model.id);
+    else params.openModelIds.add(model.id);
+    options.setAttribute("aria-expanded", String(!settings.hidden));
+  });
+  row.append(test, imageTest, options);
+  modelWrap.append(row, settings);
+  return modelWrap;
 }
 
 async function testDraftModel(
@@ -598,36 +634,23 @@ function labeledSelect(
 
 function fieldWrap(doc: Document, labelText: string): HTMLElement {
   const wrap = htmlElement(doc, "label");
-  Object.assign(wrap.style, {
-    display: "flex",
-    flexDirection: "column",
-    gap: "4px",
-    marginBottom: "8px",
-  });
+  wrap.className = "pt-provider-field";
   const label = htmlElement(doc, "span");
   label.textContent = labelText;
-  label.style.fontWeight = "600";
+  label.className = "pt-provider-field-label";
   wrap.append(label);
   return wrap;
 }
 
 function applyInputStyle(input: HTMLInputElement | HTMLSelectElement): void {
-  Object.assign(input.style, {
-    boxSizing: "border-box",
-    width: "100%",
-    minWidth: "0",
-    padding: "6px 8px",
-  });
+  input.classList.add("pt-provider-input");
 }
 
 function actionButton(doc: Document, text: string): HTMLButtonElement {
   const button = htmlElement(doc, "button");
   button.type = "button";
   button.textContent = text;
-  Object.assign(button.style, {
-    padding: "4px 9px",
-    whiteSpace: "nowrap",
-  });
+  button.classList.add("pt-provider-button");
   return button;
 }
 
@@ -646,4 +669,166 @@ function requiredElement<T extends Element>(doc: Document, id: string): T {
   if (!element)
     throw new Error(`Required preferences element is missing: ${id}`);
   return element as unknown as T;
+}
+
+function ensureProviderStyles(doc: Document): void {
+  const id = `${config.addonRef}-provider-styles`;
+  if (doc.getElementById(id)) return;
+  const stylesheet = htmlElement(doc, "link");
+  stylesheet.id = id;
+  stylesheet.rel = "stylesheet";
+  stylesheet.href = `chrome://${config.addonRef}/content/providerPreferences.css`;
+  (doc.head || doc.documentElement).append(stylesheet);
+}
+
+function providerBrand(provider: ModelProviderGroup): string {
+  if (provider.authMode === "codex_auth") return "Codex";
+  const preset = PROVIDER_PRESETS.find(
+    (entry) => entry.id === provider.presetId,
+  );
+  if (preset) return preset.label.split(" · ")[0];
+  try {
+    const host = new URL(provider.apiBase).hostname;
+    if (host === "api.openai.com") return "OpenAI";
+    if (host === "api.anthropic.com") return "Anthropic";
+    if (host === "api.deepseek.com") return "DeepSeek";
+  } catch {
+    /* An unfinished custom draft has no brand. */
+  }
+  return getString("pref-provider-custom");
+}
+
+function createProviderHeader(
+  params: ProviderCardRenderParams,
+  card: HTMLElement,
+  provider: ModelProviderGroup,
+): HTMLElement {
+  const doc = params.doc;
+  const header = htmlElement(doc, "div");
+  header.className = "pt-provider-head";
+  const icon = htmlElement(doc, "span");
+  icon.className = "pt-provider-brand-icon";
+  icon.setAttribute("aria-hidden", "true");
+  const toggle = actionButton(doc, "");
+  toggle.className = "pt-provider-toggle";
+  toggle.setAttribute(
+    "aria-expanded",
+    String(params.openProviderIds.has(provider.id)),
+  );
+  const name = htmlElement(doc, "span");
+  name.className = "pt-provider-title";
+  const meta = htmlElement(doc, "span");
+  meta.className = "pt-provider-meta";
+  const dot = htmlElement(doc, "span");
+  dot.className = "pt-provider-dot";
+  const summary = htmlElement(doc, "span");
+  summary.className = "pt-provider-summary";
+  meta.append(dot, summary);
+  toggle.append(name, meta);
+  const tag = htmlElement(doc, "span");
+  tag.className = "pt-provider-tag";
+  const chevron = htmlElement(doc, "span");
+  chevron.className = "pt-provider-chevron";
+  chevron.textContent = "›";
+  chevron.setAttribute("aria-hidden", "true");
+  toggle.addEventListener("click", () => {
+    const open = !params.openProviderIds.has(provider.id);
+    if (open) params.openProviderIds.add(provider.id);
+    else params.openProviderIds.delete(provider.id);
+    card.dataset.open = String(open);
+    toggle.setAttribute("aria-expanded", String(open));
+    (card.querySelector(".pt-provider-body") as HTMLElement).hidden = !open;
+  });
+  header.append(icon, toggle, tag, chevron);
+  header.addEventListener("click", (event) => {
+    if (!(event.target as Element).closest(".pt-provider-toggle"))
+      toggle.click();
+  });
+  return header;
+}
+
+function updateProviderHeader(
+  card: HTMLElement,
+  provider: ModelProviderGroup,
+  activeModelId: string,
+): void {
+  const brand = providerBrand(provider);
+  const active = provider.models.find((entry) => entry.id === activeModelId);
+  const model = active || provider.models.find((entry) => entry.model.trim());
+  const title = card.querySelector(".pt-provider-title") as HTMLElement;
+  title.textContent =
+    provider.name.trim() || getString("pref-provider-unnamed");
+  const summary = card.querySelector(".pt-provider-summary") as HTMLElement;
+  summary.textContent = `${brand} · ${provider.authMode === "codex_auth" ? getString("pref-provider-login") : "API"} · ${model?.model.trim() || getString("pref-provider-model-unset")}`;
+  const tag = card.querySelector(".pt-provider-tag") as HTMLElement;
+  tag.textContent =
+    provider.authMode === "codex_auth"
+      ? getString("pref-provider-codex-auth")
+      : getString("pref-provider-key-auth");
+  const dot = card.querySelector(".pt-provider-dot") as HTMLElement;
+  dot.dataset.current = String(Boolean(active));
+  dot.title = active
+    ? getString("pref-provider-current")
+    : getString("pref-provider-not-current");
+  card.dataset.open =
+    card.querySelector(".pt-provider-toggle")!.getAttribute("aria-expanded") ||
+    "false";
+  const icon = card.querySelector(".pt-provider-brand-icon") as HTMLElement;
+  const iconId =
+    brand === "Codex" || brand === "OpenAI"
+      ? "openai"
+      : brand === "Anthropic"
+        ? "anthropic"
+        : brand === "DeepSeek"
+          ? "deepseek"
+          : "";
+  if (icon.dataset.brand !== iconId || !icon.firstChild) {
+    icon.dataset.brand = iconId;
+    if (iconId) {
+      const image = htmlElement(card.ownerDocument, "img");
+      image.src = `chrome://${config.addonRef}/content/icons/providers/${iconId}.svg`;
+      image.alt = "";
+      icon.replaceChildren(image);
+    } else icon.textContent = "AI";
+  }
+}
+
+function bindPreferenceTabs(doc: Document): void {
+  const tabs = ["providers", "translation"].map(
+    (id) =>
+      doc.getElementById(
+        `${config.addonRef}-${id}-tab`,
+      ) as HTMLButtonElement | null,
+  );
+  if (tabs.some((tab) => !tab)) return;
+  const selectTab = (selected: number, focus = false) => {
+    tabs.forEach((tab, index) => {
+      tab!.setAttribute("aria-selected", String(index === selected));
+      tab!.tabIndex = index === selected ? 0 : -1;
+      const panel = doc.getElementById(
+        tab!.getAttribute("aria-controls") || "",
+      );
+      if (panel) panel.hidden = index !== selected;
+    });
+    if (focus) tabs[selected]!.focus();
+  };
+  tabs.forEach((tab, index) => {
+    tab!.addEventListener("click", () => selectTab(index));
+    tab!.addEventListener("keydown", (event) => {
+      const next =
+        event.key === "ArrowRight"
+          ? (index + 1) % tabs.length
+          : event.key === "ArrowLeft"
+            ? (index + tabs.length - 1) % tabs.length
+            : event.key === "Home"
+              ? 0
+              : event.key === "End"
+                ? tabs.length - 1
+                : -1;
+      if (next < 0) return;
+      event.preventDefault();
+      selectTab(next, true);
+    });
+  });
+  selectTab(0);
 }

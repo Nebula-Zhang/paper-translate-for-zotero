@@ -42,3 +42,12 @@ User-authorized scope: implement the approved provider/API design, produce a loc
 - Remove the Anthropic workspace field from the UI. Keep stored protocol parameters compatible; required Anthropic version/output fields still use internal defaults for new configurations.
 - Relabel the Anthropic Chat Completions compatibility preset without changing its ID, protocol or destination.
 - Confirm the simplified UI for OpenAI, Anthropic, DeepSeek and Codex using the existing DOM interaction test; rebuild and deliver a patch XPI without pushing or opening a PR.
+
+## 1.5.2 — provider UI parity
+
+- Reference: llm-for-zotero 7e26a134fe0808070d63df49a25ca9ba3bf031c9, src/modules/preferenceScript.ts provider-row section; copied provider SVG assets under addon/content/icons/providers/ (openai.svg, anthropic.svg, deepseek.svg). Provenance is retained in NOTICE.
+- Replace stacked always-visible forms with initially collapsed, accessible provider cards. Preserve expanded cards during rerender and automatically open new providers.
+- Match the reference's summary, brand icon, auth tag, chevron, two-column connection form, model rows, footer actions and full-width dashed add button.
+- Organize existing AI-provider and translation settings into two keyboard-navigable tabs; do not introduce Agent or MinerU tabs.
+- Keep API protocols, request timeouts, explicit save, current-model selection, text/image tests and deletion safeguards unchanged. No advanced settings disclosure or workspace input is reintroduced.
+- Verify interactions in the actual preferences markup, browser-render collapsed/expanded/narrow views, run regression and static checks, and deliver a local patch XPI without pushing or creating a PR.

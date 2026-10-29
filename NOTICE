@@ -53,6 +53,13 @@ This project contains and adapts code from:
    It does not reuse model-name inference, automatic protocol fallback,
    conversation state, file upload or provider-specific Agent runtimes.
 
+   Version 1.5.2 adapts the collapsible provider-row interaction and layout
+   from src/modules/preferenceScript.ts at the same reviewed revision
+   7e26a134fe0808070d63df49a25ca9ba3bf031c9. It includes the unmodified
+   addon/content/icons/providers/openai.svg, anthropic.svg and deepseek.svg
+   assets from that revision. This adaptation does not share upstream runtime
+   objects, provider preferences or credentials.
+
    Only the Reader interaction and coordinate-mapping patterns are reused for
    OCR. This project does not reuse screenshot.ts captureRegion, PDF canvas
    capture, drawWindow fallback, or PDF page rendering. It crops the local

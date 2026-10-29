@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { setImmediate } from "node:timers/promises";
+import { readFile } from "node:fs/promises";
 import { JSDOM } from "jsdom";
 import { registerPrefsScripts } from "../src/modules/preferenceWindow";
 import {
@@ -11,8 +12,14 @@ import {
 import { createModelSelectionActions } from "../src/models/selection";
 
 test("settings preset selection, custom editing, save, text test and image test work through the real UI handlers", async () => {
+  const template = await readFile(
+    new URL("../addon/chrome/content/preferences.xhtml", import.meta.url),
+    "utf8",
+  );
   const dom = new JSDOM(
-    '<input id="papertranslateforzotero-sourceLanguage"><button id="papertranslateforzotero-add-provider">Add</button><div id="papertranslateforzotero-model-providers"></div>',
+    template
+      .replaceAll("__addonRef__", "papertranslateforzotero")
+      .replaceAll("html:", ""),
   );
   const prefs = new Map<string, unknown>();
   let cancellations = 0;
@@ -91,13 +98,59 @@ test("settings preset selection, custom editing, save, text test and image test 
   };
   const button = (text: string) => {
     const node = Array.from(doc.querySelectorAll("button")).find(
-      (item) => item.textContent === text,
+      (item) =>
+        item.textContent === text || item.getAttribute("aria-label") === text,
     );
     assert.ok(node, text);
     return node;
   };
   try {
     registerPrefsScripts(dom.window as unknown as Window, actions);
+    const card = doc.querySelector(".pt-provider-card")!;
+    const cardToggle = card.querySelector(
+      ".pt-provider-toggle",
+    ) as HTMLButtonElement;
+    assert.equal(cardToggle.getAttribute("aria-expanded"), "false");
+    assert.equal(
+      (card.querySelector(".pt-provider-body") as HTMLElement).hidden,
+      true,
+    );
+    (card.querySelector(".pt-provider-chevron") as HTMLElement).click();
+    assert.equal(cardToggle.getAttribute("aria-expanded"), "true");
+    assert.equal(
+      (card.querySelector(".pt-provider-body") as HTMLElement).hidden,
+      false,
+    );
+    input("pref-provider-name", "Renamed provider");
+    assert.equal(
+      card.querySelector(".pt-provider-title")!.textContent,
+      "Renamed provider",
+    );
+    cardToggle.click();
+    cardToggle.click();
+    assert.equal(control("pref-provider-name").value, "Renamed provider");
+    const translationTab = doc.getElementById(
+      "papertranslateforzotero-translation-tab",
+    ) as HTMLButtonElement;
+    const providersTab = doc.getElementById(
+      "papertranslateforzotero-providers-tab",
+    ) as HTMLButtonElement;
+    translationTab.click();
+    assert.equal(
+      doc.getElementById("papertranslateforzotero-providers-panel")!.hidden,
+      true,
+    );
+    translationTab.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", {
+        key: "ArrowLeft",
+        bubbles: true,
+      }),
+    );
+    assert.equal(providersTab.getAttribute("aria-selected"), "true");
+    assert.equal(
+      doc.getElementById("papertranslateforzotero-providers-panel")!.hidden,
+      false,
+    );
     const assertSimpleSettings = () => {
       assert.equal(
         doc.querySelector("details"),
@@ -129,6 +182,14 @@ test("settings preset selection, custom editing, save, text test and image test 
     );
     assert.equal(control("pref-provider-protocol").value, "responses");
     assert.equal(control("pref-provider-protocol").disabled, true);
+    assert.equal(
+      control("pref-provider-protocol").closest("label")!.hidden,
+      true,
+    );
+    assert.equal(
+      doc.querySelector(".pt-provider-toggle")!.getAttribute("aria-expanded"),
+      "true",
+    );
     assert.equal(control("pref-provider-api-key").value, "fake-key");
     change("pref-provider-preset", "deepseek-chat");
     assert.equal(control("pref-provider-api-key").value, "");
@@ -137,6 +198,10 @@ test("settings preset selection, custom editing, save, text test and image test 
       "https://api.deepseek.com/chat/completions",
     );
     change("pref-provider-preset", "custom");
+    assert.equal(
+      control("pref-provider-protocol").closest("label")!.hidden,
+      false,
+    );
     assert.equal(
       (control("pref-provider-api-base") as HTMLInputElement).readOnly,
       false,
@@ -176,6 +241,15 @@ test("settings preset selection, custom editing, save, text test and image test 
       /success: TEST 42/u,
     );
     assert.equal(requests, 2);
+    const options = button("pref-provider-model-options");
+    assert.equal(options.getAttribute("aria-expanded"), "false");
+    options.click();
+    assert.equal(options.getAttribute("aria-expanded"), "true");
+    assert.equal(
+      (doc.querySelector(".pt-model-controls") as HTMLElement).hidden,
+      false,
+    );
+    assert.equal(button("pref-provider-current").disabled, true);
     for (const preset of [
       "anthropic-messages",
       "anthropic-chat",
@@ -191,6 +265,21 @@ test("settings preset selection, custom editing, save, text test and image test 
     );
     change("pref-auth-mode", "codex_auth");
     assertSimpleSettings();
+    (
+      doc.getElementById(
+        "papertranslateforzotero-add-provider",
+      ) as HTMLButtonElement
+    ).click();
+    assert.equal(doc.querySelectorAll(".pt-provider-card").length, 2);
+    const newCard = doc.querySelectorAll(".pt-provider-card")[1];
+    assert.equal(
+      newCard
+        .querySelector(".pt-provider-toggle")!
+        .getAttribute("aria-expanded"),
+      "true",
+    );
+    (newCard.querySelector(".pt-danger-button") as HTMLButtonElement).click();
+    assert.equal(doc.querySelectorAll(".pt-provider-card").length, 1);
   } finally {
     dom.window.dispatchEvent(new dom.window.Event("unload"));
     dom.window.close();
