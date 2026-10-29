@@ -7,7 +7,11 @@ import {
 import { buildApiHeaders, redactError } from "./openAICompatibleClient";
 import { withRequestDeadline } from "./requestLifetime";
 
-export type DiscoveredModel = { id: string; name: string };
+export type DiscoveredModel = {
+  id: string;
+  name: string;
+  outputModalities?: string[];
+};
 const MAX_MODELS = 5000;
 const MAX_BYTES = 2 * 1024 * 1024;
 const MAX_PAGES = 10;
@@ -111,6 +115,21 @@ export async function fetchProviderModels(
               models.set(id, {
                 id,
                 name: typeof label === "string" ? label.slice(0, 160) : "",
+                ...(Array.isArray(entry.output_modalities) &&
+                entry.output_modalities.length > 0 &&
+                entry.output_modalities.length <= 16 &&
+                entry.output_modalities.every(
+                  (value: unknown) =>
+                    typeof value === "string" &&
+                    value.trim() &&
+                    value.length <= 32,
+                )
+                  ? {
+                      outputModalities: entry.output_modalities.map(
+                        (value: string) => value.trim().toLowerCase(),
+                      ),
+                    }
+                  : {}),
               });
             }
             if (models.size > MAX_MODELS) {

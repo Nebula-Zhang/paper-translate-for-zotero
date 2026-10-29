@@ -299,7 +299,11 @@ test("settings preset selection, custom editing, save, text test and image test 
     await setImmediate();
     let picker = doc.querySelector("dialog")!;
     assert.ok(picker?.hasAttribute("open"));
-    assert.equal(picker.querySelectorAll('input[type="checkbox"]').length, 3);
+    assert.equal(
+      picker.querySelectorAll('.pt-model-picker-row input[type="checkbox"]')
+        .length,
+      3,
+    );
     assert.equal(
       (picker.querySelector('input[value="example-model"]') as HTMLInputElement)
         .disabled,

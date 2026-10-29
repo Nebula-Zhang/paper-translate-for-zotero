@@ -1,5 +1,6 @@
 import { getString } from "../utils/locale";
 import type { DiscoveredModel } from "../models/modelDiscovery";
+import { hideModelByDefault } from "../models/modelCatalogFilter";
 
 export function openModelPicker(params: {
   root: HTMLElement;
@@ -25,6 +26,23 @@ export function openModelPicker(params: {
   search.className = "pt-provider-input";
   search.placeholder = getString("pref-provider-models-search");
   search.setAttribute("aria-label", search.placeholder);
+  const filterBar = element(doc, "div");
+  filterBar.className = "pt-model-picker-filterbar";
+  const toggleLabel = element(doc, "label");
+  toggleLabel.className = "pt-model-picker-toggle";
+  const showAll = element(doc, "input");
+  showAll.type = "checkbox";
+  showAll.setAttribute(
+    "aria-label",
+    getString("pref-provider-models-show-all"),
+  );
+  const toggleText = element(doc, "span");
+  toggleText.textContent = getString("pref-provider-models-show-all");
+  toggleLabel.append(showAll, toggleText);
+  const filterStatus = element(doc, "span");
+  filterStatus.className = "pt-model-picker-filter-status";
+  filterStatus.setAttribute("role", "status");
+  filterBar.append(toggleLabel, filterStatus);
   const list = element(doc, "div");
   list.className = "pt-model-picker-list";
   list.setAttribute("role", "group");
@@ -76,7 +94,12 @@ export function openModelPicker(params: {
       row.append(badge);
     }
     list.append(row);
-    return { row, searchText: `${model.id} ${model.name}`.toLowerCase() };
+    return {
+      row,
+      checkbox,
+      excluded: hideModelByDefault(model),
+      searchText: `${model.id} ${model.name}`.toLowerCase(),
+    };
   });
   const empty = element(doc, "p");
   empty.className = "pt-model-picker-hint";
@@ -84,12 +107,48 @@ export function openModelPicker(params: {
   empty.setAttribute("role", "status");
   empty.hidden = true;
   list.append(empty);
-  search.addEventListener("input", () => {
+  const excludedCount = rows.filter(({ excluded }) => excluded).length;
+  const updateVisibility = () => {
     const query = search.value.trim().toLowerCase();
-    for (const { row, searchText } of rows)
-      row.hidden = !searchText.includes(query);
+    for (const { row, excluded, searchText } of rows)
+      row.hidden =
+        (!showAll.checked && excluded) || !searchText.includes(query);
+    empty.textContent = getString(
+      !showAll.checked && excludedCount
+        ? "pref-provider-models-no-match-filtered"
+        : "pref-provider-models-no-match",
+    );
     empty.hidden = rows.some(({ row }) => !row.hidden);
+  };
+  const updateFilterStatus = (cleared = false) => {
+    filterStatus.textContent =
+      showAll.checked || !excludedCount
+        ? getString("pref-provider-models-total", {
+            args: { count: rows.length },
+          })
+        : getString("pref-provider-models-hidden", {
+            args: { count: excludedCount },
+          });
+    if (cleared)
+      filterStatus.textContent += ` ${getString("pref-provider-models-hidden-cleared")}`;
+  };
+  search.addEventListener("input", updateVisibility);
+  showAll.addEventListener("change", () => {
+    let cleared = false;
+    if (!showAll.checked) {
+      for (const { excluded, checkbox } of rows) {
+        if (!excluded || checkbox.disabled || !selected.delete(checkbox.value))
+          continue;
+        checkbox.checked = false;
+        cleared = true;
+      }
+      updateCount();
+    }
+    updateVisibility();
+    updateFilterStatus(cleared);
   });
+  updateVisibility();
+  updateFilterStatus();
   const footer = element(doc, "div");
   footer.className = "pt-model-picker-footer";
   const cancel = button(doc, getString("pref-provider-models-cancel"));
@@ -138,7 +197,7 @@ export function openModelPicker(params: {
   });
   updateCount();
   footer.append(cancel, confirm);
-  dialog.append(title, hint, search, list, footer);
+  dialog.append(title, hint, search, filterBar, list, footer);
   params.root.append(dialog);
   try {
     if (typeof dialog.showModal === "function") dialog.showModal();

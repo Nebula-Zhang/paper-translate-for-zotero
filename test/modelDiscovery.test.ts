@@ -24,6 +24,28 @@ function provider(
 }
 const json = (data: unknown) => new Response(JSON.stringify(data));
 
+test("preserves valid declared output modalities while ignoring malformed optional metadata", async () => {
+  const models = await fetchProviderModels(provider(), {
+    fetchFn: async () =>
+      json({
+        data: [
+          { id: "a", output_modalities: [" Image "] },
+          { id: "b", output_modalities: ["text", "audio"] },
+          { id: "c", output_modalities: [] },
+          { id: "d", output_modalities: [null] },
+          { id: "e", output_modalities: "image" },
+        ],
+      }),
+  });
+  assert.deepEqual(models, [
+    { id: "a", name: "", outputModalities: ["image"] },
+    { id: "b", name: "", outputModalities: ["text", "audio"] },
+    { id: "c", name: "" },
+    { id: "d", name: "" },
+    { id: "e", name: "" },
+  ]);
+});
+
 test("all seven presets use their own official catalog URL and catalog authentication", () => {
   for (const preset of PROVIDER_PRESETS) {
     const catalog = resolveModelCatalog(
