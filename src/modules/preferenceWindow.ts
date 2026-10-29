@@ -13,6 +13,14 @@ import {
 } from "../models/providers";
 import { modelErrorMessage, testModelConnection } from "../models/runtime";
 import type { ModelSelectionActions } from "../models/selection";
+import {
+  API_PROTOCOLS,
+  PROVIDER_PRESETS,
+  endpointPreview,
+  resolveApiEndpoint,
+  type ApiProtocol,
+} from "../models/protocols";
+import { testModelImageConnection } from "../models/connectionTests";
 
 export const PREFERENCES_PANE_ID = `${config.addonRef}-preferences`;
 const CONNECTION_TEST_TIMEOUT_MS = 30_000;
@@ -49,6 +57,7 @@ export function registerPrefsScripts(
   let drafts = cloneProviders(getModelProviderConfiguration().providers);
 
   const render = () => {
+    cancelConnectionTests();
     const configuration = getModelProviderConfiguration();
     renderProviderCards({
       doc,
@@ -189,7 +198,7 @@ function createProviderCard(
     getString("pref-auth-mode"),
     [
       ["codex_auth", "Codex Auth"],
-      ["openai_compatible", "OpenAI Compatible"],
+      ["openai_compatible", "API Key"],
     ],
     provider.authMode,
   );
@@ -198,6 +207,11 @@ function createProviderCard(
     provider.authMode = next;
     provider.apiBase = "";
     provider.apiKey = "";
+    provider.presetId = "custom";
+    provider.protocol = "chat_completions";
+    provider.workspaceId = "";
+    provider.anthropicVersion = "2023-06-01";
+    provider.maxTokens = 8192;
     for (const model of provider.models) {
       model.effort = next === "codex_auth" ? "medium" : "";
     }
@@ -206,14 +220,74 @@ function createProviderCard(
 
   card.append(header, auth.wrap);
   if (provider.authMode === "openai_compatible") {
+    const preset = labeledSelect(
+      doc,
+      getString("pref-provider-preset"),
+      [
+        ...PROVIDER_PRESETS.map((entry): [string, string] => [
+          entry.id,
+          entry.label,
+        ]),
+        ["custom", getString("pref-provider-custom")],
+      ],
+      provider.presetId || "custom",
+    );
+    preset.select.addEventListener("change", () => {
+      const selected = PROVIDER_PRESETS.find(
+        (entry) => entry.id === preset.select.value,
+      );
+      if (selected) {
+        let oldHost = "";
+        try {
+          oldHost = new URL(provider.apiBase).host;
+        } catch {
+          /* An empty draft has no host. */
+        }
+        if (oldHost !== new URL(selected.url).host) {
+          provider.apiKey = "";
+          provider.workspaceId = "";
+        }
+        provider.apiBase = selected.url;
+        provider.protocol = selected.protocol;
+      }
+      provider.presetId = selected?.id || "custom";
+      params.onDraftsChanged([...params.drafts]);
+    });
+    const protocol = labeledSelect(
+      doc,
+      getString("pref-provider-protocol"),
+      API_PROTOCOLS,
+      provider.protocol ?? "chat_completions",
+    );
+    protocol.select.disabled = (provider.presetId || "custom") !== "custom";
+    protocol.select.addEventListener("change", () => {
+      provider.protocol = protocol.select.value as ApiProtocol;
+      params.onDraftsChanged([...params.drafts]);
+    });
+    card.append(preset.wrap, protocol.wrap);
     const apiBase = labeledInput(
       doc,
       getString("pref-provider-api-base"),
       provider.apiBase,
     );
     apiBase.input.placeholder = "https://api.example.com/v1";
+    apiBase.input.readOnly = (provider.presetId || "custom") !== "custom";
+    const preview = htmlElement(doc, "p");
+    preview.style.overflowWrap = "anywhere";
+    preview.style.fontSize = "0.9em";
+    preview.setAttribute("aria-live", "polite");
+    const updatePreview = () => {
+      try {
+        preview.textContent = `${getString("pref-provider-endpoint")}: ${endpointPreview(resolveApiEndpoint(provider.apiBase, provider.protocol ?? "chat_completions"))}`;
+        preview.style.color = "";
+      } catch (error) {
+        preview.textContent = modelErrorMessage(error);
+        preview.style.color = "#b42318";
+      }
+    };
     apiBase.input.addEventListener("input", () => {
       provider.apiBase = apiBase.input.value;
+      updatePreview();
     });
     const apiKey = labeledInput(
       doc,
@@ -226,8 +300,56 @@ function createProviderCard(
     apiKey.input.addEventListener("input", () => {
       provider.apiKey = apiKey.input.value;
     });
-    card.append(apiBase.wrap, apiKey.wrap);
+    updatePreview();
+    card.append(apiBase.wrap, preview, apiKey.wrap);
+    const advanced = htmlElement(doc, "details");
+    const summary = htmlElement(doc, "summary");
+    summary.textContent = getString("pref-provider-advanced");
+    advanced.append(summary);
+    if ((provider.protocol ?? "chat_completions") === "anthropic_messages") {
+      const version = labeledInput(
+        doc,
+        getString("pref-provider-version"),
+        provider.anthropicVersion ?? "2023-06-01",
+      );
+      version.input.addEventListener("input", () => {
+        provider.anthropicVersion = version.input.value;
+      });
+      const limit = labeledInput(
+        doc,
+        getString("pref-provider-max-tokens"),
+        String(provider.maxTokens ?? 8192),
+        "number",
+      );
+      limit.input.min = "1";
+      limit.input.addEventListener("input", () => {
+        provider.maxTokens = Number(limit.input.value);
+      });
+      advanced.append(version.wrap, limit.wrap);
+    }
+    const workspace = labeledInput(
+      doc,
+      getString("pref-provider-workspace"),
+      provider.workspaceId ?? "",
+    );
+    workspace.input.addEventListener("input", () => {
+      provider.workspaceId = workspace.input.value;
+    });
+    advanced.append(workspace.wrap);
+    card.append(advanced);
   }
+  const timeout = labeledInput(
+    doc,
+    getString("pref-provider-timeout"),
+    String(provider.timeoutSeconds ?? 120),
+    "number",
+  );
+  timeout.input.min = "1";
+  timeout.input.max = "3600";
+  timeout.input.addEventListener("input", () => {
+    provider.timeoutSeconds = Number(timeout.input.value);
+  });
+  card.append(timeout.wrap);
 
   const modelHeading = htmlElement(doc, "div");
   Object.assign(modelHeading.style, {
@@ -298,11 +420,8 @@ function createModelRow(
   const doc = params.doc;
   const row = htmlElement(doc, "div");
   Object.assign(row.style, {
-    display: "grid",
-    gridTemplateColumns:
-      provider.authMode === "codex_auth"
-        ? "minmax(120px, 1fr) 110px auto auto auto"
-        : "minmax(120px, 1fr) auto auto auto",
+    display: "flex",
+    flexWrap: "wrap",
     gap: "6px",
     alignItems: "center",
     marginBottom: "6px",
@@ -311,7 +430,10 @@ function createModelRow(
   modelInput.type = "text";
   modelInput.value = model.model;
   modelInput.placeholder = getString("pref-provider-model-id");
+  modelInput.setAttribute("aria-label", getString("pref-provider-model-id"));
   applyInputStyle(modelInput);
+  modelInput.style.flex = "1";
+  modelInput.style.minWidth = "120px";
   modelInput.addEventListener("input", () => {
     model.model = modelInput.value;
   });
@@ -327,6 +449,7 @@ function createModelRow(
     }
     effort.value = model.effort || "medium";
     applyInputStyle(effort);
+    effort.style.width = "100px";
     effort.addEventListener("change", () => {
       model.effort = effort.value;
     });
@@ -358,6 +481,10 @@ function createModelRow(
   test.addEventListener("click", () => {
     void testDraftModel(card, provider, model, test);
   });
+  const imageTest = actionButton(doc, getString("pref-provider-image-test"));
+  imageTest.addEventListener("click", () => {
+    void testDraftModel(card, provider, model, imageTest, "image");
+  });
 
   const remove = actionButton(doc, "×");
   remove.title = getString("pref-provider-remove-model");
@@ -374,7 +501,7 @@ function createModelRow(
     provider.models = provider.models.filter((entry) => entry.id !== model.id);
     params.onDraftsChanged([...params.drafts]);
   });
-  row.append(select, test, remove);
+  row.append(select, test, imageTest, remove);
   return row;
 }
 
@@ -383,21 +510,27 @@ async function testDraftModel(
   provider: ModelProviderGroup,
   model: ProviderModel,
   button: HTMLButtonElement,
+  kind: "text" | "image" = "text",
 ): Promise<void> {
   cancelConnectionTests();
   const controller = new AbortController();
   connectionTestControllers.add(controller);
   const timer = setTimeout(
     () => controller.abort(new Error("Connection test timed out")),
-    CONNECTION_TEST_TIMEOUT_MS,
+    kind === "image" ? 60_000 : CONNECTION_TEST_TIMEOUT_MS,
   );
   button.disabled = true;
   showCardStatus(card, getString("pref-codex-testing"), false);
   try {
     const runtime = resolveDraftRuntimeModel(provider, model);
-    const reply = await testModelConnection(runtime, controller.signal);
+    const reply =
+      kind === "image"
+        ? await testModelImageConnection(runtime, controller.signal)
+        : await testModelConnection(runtime, controller.signal);
+    if (controller.signal.aborted || !card.isConnected) return;
     showCardStatus(card, `${getString("pref-codex-success")}: ${reply}`, false);
   } catch (error) {
+    if (!card.isConnected || !connectionTestControllers.has(controller)) return;
     showCardStatus(
       card,
       `${getString("pref-codex-failed")}: ${modelErrorMessage(error)}`,
@@ -471,6 +604,7 @@ function labeledInput(
   const input = htmlElement(doc, "input");
   input.type = type;
   input.value = value;
+  input.setAttribute("aria-label", labelText);
   applyInputStyle(input);
   wrap.append(input);
   return { wrap, input };
@@ -484,6 +618,7 @@ function labeledSelect(
 ): { wrap: HTMLElement; select: HTMLSelectElement } {
   const wrap = fieldWrap(doc, labelText);
   const select = htmlElement(doc, "select");
+  select.setAttribute("aria-label", labelText);
   for (const [optionValue, text] of options) {
     const option = htmlElement(doc, "option");
     option.value = optionValue;
