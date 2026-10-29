@@ -72,9 +72,13 @@ test("keeps dynamic provider controls localized and compact", async () => {
       ),
     ),
   );
-  const dynamicKeys = [...script.matchAll(/getString\("(pref-[^"]+)"\)/gu)].map(
-    (match) => match[1],
+  const pickerScript = await readFile(
+    new URL("../src/modules/modelPicker.ts", import.meta.url),
+    "utf8",
   );
+  const dynamicKeys = [
+    ...(script + pickerScript).matchAll(/getString\("(pref-[^"]+)"\)/gu),
+  ].map((match) => match[1]);
 
   assert.ok(dynamicKeys.length > 0);
   for (const addonLocale of addonLocales) {

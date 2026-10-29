@@ -21,11 +21,15 @@ import {
   type ApiProtocol,
 } from "../models/protocols";
 import { testModelImageConnection } from "../models/connectionTests";
+import { fetchProviderModels } from "../models/modelDiscovery";
+import { openModelPicker } from "./modelPicker";
 
 export const PREFERENCES_PANE_ID = `${config.addonRef}-preferences`;
 const CONNECTION_TEST_TIMEOUT_MS = 30_000;
 let preferencesRegistered = false;
 const connectionTestControllers = new Set<AbortController>();
+const discoveryControllers = new Map<HTMLElement, AbortController>();
+const modelPickers = new Map<HTMLElement, () => void>();
 
 export async function registerPrefsWindow(): Promise<void> {
   if (preferencesRegistered) return;
@@ -42,6 +46,7 @@ export async function registerPrefsWindow(): Promise<void> {
 
 export function unregisterPrefsWindow(): void {
   cancelConnectionTests();
+  stopModelDiscovery();
   if (!preferencesRegistered) return;
   Zotero.PreferencePanes.unregister(PREFERENCES_PANE_ID);
   preferencesRegistered = false;
@@ -62,6 +67,7 @@ export function registerPrefsScripts(
 
   const render = () => {
     cancelConnectionTests();
+    stopModelDiscovery();
     const configuration = getModelProviderConfiguration();
     renderProviderCards({
       doc,
@@ -107,6 +113,7 @@ export function registerPrefsScripts(
     () => {
       unsubscribe();
       cancelConnectionTests();
+      stopModelDiscovery();
     },
     { once: true },
   );
@@ -277,6 +284,7 @@ function createProviderCard(
       }
     };
     apiBase.input.addEventListener("input", () => {
+      stopModelDiscovery(card);
       provider.apiBase = apiBase.input.value;
       updatePreview();
     });
@@ -289,6 +297,7 @@ function createProviderCard(
     apiKey.input.placeholder = "sk-…";
     apiKey.input.autocomplete = "off";
     apiKey.input.addEventListener("input", () => {
+      stopModelDiscovery(card);
       provider.apiKey = apiKey.input.value;
     });
     updatePreview();
@@ -323,7 +332,18 @@ function createProviderCard(
     provider.models.push(createProviderModel());
     params.onDraftsChanged([...params.drafts]);
   });
-  modelHeading.append(modelTitle, addModel);
+  const modelActions = htmlElement(doc, "div");
+  modelActions.className = "pt-model-heading-actions";
+  if (provider.authMode === "openai_compatible") {
+    const discover = actionButton(doc, getString("pref-provider-models-fetch"));
+    discover.classList.add("pt-fetch-models");
+    discover.addEventListener("click", () => {
+      void discoverProviderModels(params, card, provider, discover);
+    });
+    modelActions.append(discover);
+  }
+  modelActions.append(addModel);
+  modelHeading.append(modelTitle, modelActions);
   models.append(modelHeading);
 
   for (const model of provider.models) {
@@ -388,6 +408,94 @@ function createProviderCard(
   card.dataset.providerIndex = String(providerIndex);
   card.dataset.providerId = provider.id;
   return card;
+}
+
+function stopModelDiscovery(card?: HTMLElement): void {
+  for (const [owner, controller] of discoveryControllers) {
+    if (card && owner !== card) continue;
+    discoveryControllers.delete(owner);
+    controller.abort(new Error("Model discovery cancelled"));
+    if (card && owner.isConnected) showCardStatus(owner, "", false);
+  }
+  for (const [owner, close] of modelPickers) {
+    if (card && owner !== card) continue;
+    close();
+  }
+}
+
+async function discoverProviderModels(
+  params: ProviderCardRenderParams,
+  card: HTMLElement,
+  provider: ModelProviderGroup,
+  button: HTMLButtonElement,
+): Promise<void> {
+  stopModelDiscovery(card);
+  const controller = new AbortController();
+  discoveryControllers.set(card, controller);
+  button.disabled = true;
+  showCardStatus(card, getString("pref-provider-models-fetching"), false);
+  try {
+    const models = await fetchProviderModels(
+      { ...provider },
+      { signal: controller.signal },
+    );
+    if (controller.signal.aborted || !card.isConnected) return;
+    showCardStatus(card, "", false);
+    const close = openModelPicker({
+      root: requiredElement<HTMLElement>(
+        params.doc,
+        `zotero-prefpane-${config.addonRef}`,
+      ),
+      models,
+      existing: new Set(provider.models.map((entry) => entry.model.trim())),
+      trigger: button,
+      onClose: () => modelPickers.delete(card),
+      onConfirm(ids) {
+        const existing = new Set(
+          provider.models.map((entry) => entry.model.trim()),
+        );
+        const added = ids.filter((id) => !existing.has(id));
+        if (!added.length) return;
+        provider.models = provider.models.filter(
+          (entry) => entry.model.trim() || entry.id === params.activeModelId,
+        );
+        provider.models.push(
+          ...added.map((id) => ({ ...createProviderModel(id), effort: "" })),
+        );
+        params.onDraftsChanged([...params.drafts]);
+        const nextCard = Array.from(
+          params.doc.querySelectorAll(".pt-provider-card"),
+        )
+          .map((entry) => entry as unknown as HTMLElement)
+          .find((entry) => entry.dataset.providerId === provider.id);
+        if (nextCard) {
+          showCardStatus(
+            nextCard,
+            getString("pref-provider-models-added", {
+              args: { count: added.length },
+            }),
+            false,
+          );
+          nextCard
+            .querySelector<HTMLButtonElement>(".pt-fetch-models")
+            ?.focus();
+        }
+      },
+    });
+    modelPickers.set(card, close);
+  } catch (error) {
+    if (!controller.signal.aborted && card.isConnected) {
+      showCardStatus(
+        card,
+        `${getString("pref-provider-models-fetch-failed")}: ${modelErrorMessage(error)}`,
+        true,
+      );
+    }
+  } finally {
+    if (discoveryControllers.get(card) === controller)
+      discoveryControllers.delete(card);
+    button.disabled = false;
+  }
 }
 
 function createModelRow(
@@ -593,7 +701,7 @@ function showCardStatus(
     `.${config.addonRef}-provider-status`,
   ) as HTMLElement | null;
   if (!status) return;
-  status.hidden = false;
+  status.hidden = !message;
   status.style.color = error ? "#b42318" : "#168c68";
   status.textContent = message;
 }

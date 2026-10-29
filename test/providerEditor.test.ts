@@ -24,6 +24,9 @@ test("settings preset selection, custom editing, save, text test and image test 
   const prefs = new Map<string, unknown>();
   let cancellations = 0;
   let requests = 0;
+  let listingRequests = 0;
+  let listingMode: "ok" | "error" | "delayed" = "ok";
+  let resolveListing: ((response: Response) => void) | undefined;
   (globalThis as any).Zotero = {
     Prefs: {
       get: (key: string) => prefs.get(key),
@@ -45,6 +48,25 @@ test("settings preset selection, custom editing, save, text test and image test 
   };
   (globalThis as any).ztoolkit = {
     getGlobal: () => async (_url: string, init: RequestInit) => {
+      if (init.method === "GET") {
+        listingRequests += 1;
+        if (listingMode === "error")
+          return new Response("denied", { status: 403 });
+        if (listingMode === "delayed")
+          return new Promise<Response>((resolve) => {
+            resolveListing = resolve;
+          });
+        return new Response(
+          JSON.stringify({
+            data: [
+              { id: "example-model" },
+              { id: "model-b", name: "<img src=x onerror=alert(1)>" },
+              { id: "model-c", name: "Example C" },
+              { id: "model-b" },
+            ],
+          }),
+        );
+      }
       requests += 1;
       const payload = JSON.parse(String(init.body));
       const text = payload.input[0].content.some(
@@ -272,6 +294,102 @@ test("settings preset selection, custom editing, save, text test and image test 
       false,
     );
     assert.equal(button("pref-provider-current").disabled, true);
+
+    button("pref-provider-models-fetch").click();
+    await setImmediate();
+    let picker = doc.querySelector("dialog")!;
+    assert.ok(picker?.hasAttribute("open"));
+    assert.equal(picker.querySelectorAll('input[type="checkbox"]').length, 3);
+    assert.equal(
+      (picker.querySelector('input[value="example-model"]') as HTMLInputElement)
+        .disabled,
+      true,
+    );
+    assert.equal(
+      picker.querySelector("img"),
+      null,
+      "provider labels are plain text",
+    );
+    assert.equal(button("pref-provider-models-add-selected").disabled, true);
+    const search = control("pref-provider-models-search");
+    assert.equal(doc.activeElement, search);
+    search.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", {
+        key: "Tab",
+        shiftKey: true,
+        bubbles: true,
+      }),
+    );
+    assert.equal(doc.activeElement, button("pref-provider-models-cancel"));
+    picker.dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+    );
+    assert.equal(doc.querySelector("dialog"), null);
+    assert.equal(doc.activeElement, button("pref-provider-models-fetch"));
+    assert.equal(getModelProviderConfiguration().providers[0].models.length, 1);
+
+    button("pref-provider-models-fetch").click();
+    await setImmediate();
+    picker = doc.querySelector("dialog")!;
+    (
+      picker.querySelector('input[value="model-c"]') as HTMLInputElement
+    ).click();
+    input("pref-provider-models-search", "model-b");
+    assert.equal(
+      Array.from(
+        picker.querySelectorAll<HTMLElement>(".pt-model-picker-row"),
+      ).filter((row) => !row.hidden).length,
+      1,
+    );
+    (
+      picker.querySelector('input[value="model-b"]') as HTMLInputElement
+    ).click();
+    button("pref-provider-models-add-selected").click();
+    assert.equal(doc.querySelector("dialog"), null);
+    assert.equal(doc.querySelectorAll(".pt-provider-model-row").length, 3);
+    assert.equal(
+      getModelProviderConfiguration().providers[0].models.length,
+      1,
+      "choosing models changes only the draft",
+    );
+    assert.equal(getModelProviderConfiguration().activeModelId, "m");
+    button("pref-provider-save").click();
+    assert.equal(getModelProviderConfiguration().providers[0].models.length, 3);
+    assert.equal(
+      getModelProviderConfiguration().activeModelId,
+      "m",
+      "discovery never changes the active model",
+    );
+    assert.equal(requests, 2, "discovery never generates text or tests models");
+    assert.equal(listingRequests, 2);
+
+    listingMode = "error";
+    button("pref-provider-models-fetch").click();
+    await setImmediate();
+    assert.equal(doc.querySelector("dialog"), null);
+    assert.match(doc.querySelector(".pt-provider-status")!.textContent!, /403/);
+    assert.equal(button("pref-provider-add-model").disabled, false);
+
+    listingMode = "delayed";
+    button("pref-provider-models-fetch").click();
+    await setImmediate();
+    assert.equal(button("pref-provider-models-fetch").disabled, true);
+    input("pref-provider-api-key", "edited-fake-key");
+    await setImmediate();
+    assert.equal(button("pref-provider-models-fetch").disabled, false);
+    assert.equal(
+      (doc.querySelector(".pt-provider-status") as HTMLElement).hidden,
+      true,
+    );
+    resolveListing!(
+      new Response(JSON.stringify({ data: [{ id: "late-model" }] })),
+    );
+    await setImmediate();
+    assert.equal(
+      doc.querySelector("dialog"),
+      null,
+      "late results from an old API key are discarded",
+    );
     for (const preset of [
       "anthropic-messages",
       "anthropic-chat",
@@ -287,18 +405,48 @@ test("settings preset selection, custom editing, save, text test and image test 
     );
     change("pref-auth-mode", "codex_auth");
     assertSimpleSettings();
+    assert.equal(doc.querySelector(".pt-fetch-models"), null);
     (
       doc.getElementById(
         "papertranslateforzotero-add-provider",
       ) as HTMLButtonElement
     ).click();
     assert.equal(doc.querySelectorAll(".pt-provider-card").length, 2);
-    const newCard = doc.querySelectorAll(".pt-provider-card")[1];
+    let newCard = doc.querySelectorAll(".pt-provider-card")[1];
     assert.equal(
       newCard
         .querySelector(".pt-provider-toggle")!
         .getAttribute("aria-expanded"),
       "true",
+    );
+    const newPreset = newCard.querySelector(
+      '[aria-label="pref-provider-preset"]',
+    ) as HTMLSelectElement;
+    newPreset.value = "openai-responses";
+    newPreset.dispatchEvent(new dom.window.Event("change", { bubbles: true }));
+    newCard = doc.querySelectorAll(".pt-provider-card")[1];
+    const newKey = newCard.querySelector(
+      '[aria-label="pref-provider-api-key"]',
+    ) as HTMLInputElement;
+    newKey.value = "new-provider-fake-key";
+    newKey.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+    listingMode = "ok";
+    (newCard.querySelector(".pt-fetch-models") as HTMLButtonElement).click();
+    await setImmediate();
+    picker = doc.querySelector("dialog")!;
+    (
+      picker.querySelector('input[value="model-b"]') as HTMLInputElement
+    ).click();
+    button("pref-provider-models-add-selected").click();
+    newCard = doc.querySelectorAll(".pt-provider-card")[1];
+    assert.equal(
+      newCard.querySelectorAll(".pt-provider-model-row").length,
+      1,
+      "discovery replaces a new provider's empty placeholder",
+    );
+    assert.equal(
+      (newCard.querySelector(".pt-model-input") as HTMLInputElement).value,
+      "model-b",
     );
     (newCard.querySelector(".pt-danger-button") as HTMLButtonElement).click();
     assert.equal(doc.querySelectorAll(".pt-provider-card").length, 1);

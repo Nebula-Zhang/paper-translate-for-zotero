@@ -238,6 +238,96 @@ select.pt-provider-input {
 .pt-provider-model-heading .pt-provider-section-title {
   margin: 0;
 }
+.pt-model-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pt-fetch-models {
+  color: var(--pt-accent, #3777df);
+}
+.pt-model-picker {
+  box-sizing: border-box;
+  width: min(560px, calc(100vw - 40px));
+  max-height: calc(100vh - 40px);
+  padding: 22px;
+  border: 1px solid var(--pt-border, #d8d8dc);
+  border-radius: 14px;
+  background: var(--pt-card, #fff);
+  color: var(--pt-text, #18181b);
+  font: inherit;
+  box-shadow: 0 12px 45px #00000030;
+}
+.pt-model-picker[open] {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.pt-model-picker::backdrop {
+  background: #00000040;
+}
+.pt-model-picker-title {
+  font-size: 17px;
+  line-height: 1.5;
+}
+.pt-model-picker-hint {
+  margin: 0;
+  color: var(--pt-muted, #737378);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.pt-model-picker-list {
+  min-height: 0;
+  max-height: 45vh;
+  overflow: auto;
+  border: 1px solid var(--pt-border, #d8d8dc);
+  border-radius: 8px;
+}
+.pt-model-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding: 12px;
+  cursor: pointer;
+}
+.pt-model-picker-row + .pt-model-picker-row {
+  border-top: 1px solid var(--pt-border, #d8d8dc);
+}
+.pt-model-picker-row:hover {
+  background: var(--pt-body, #f5f5f6);
+}
+.pt-model-picker-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+.pt-model-picker-model {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+.pt-model-picker-model small,
+.pt-model-picker-added {
+  color: var(--pt-muted, #737378);
+  font-size: 11px;
+}
+.pt-model-picker-added {
+  flex: 0 0 auto;
+}
+.pt-model-picker-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.pt-model-picker-list > .pt-model-picker-hint {
+  padding: 16px;
+}
 .pt-provider-model {
   margin-bottom: 10px;
 }
@@ -346,6 +436,8 @@ select.pt-provider-input {
 .pt-provider-field[hidden],
 .pt-model-controls[hidden],
 .pt-test-choices[hidden],
+.pt-model-picker-row[hidden],
+.pt-model-picker-hint[hidden],
 .pt-provider-status[hidden],
 .pt-preference-panel[hidden] {
   display: none !important;
