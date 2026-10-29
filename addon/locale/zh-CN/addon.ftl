@@ -78,16 +78,17 @@ sidebar-image-error-detail=图片取词失败：{ $detail }
 service-errorPrefix=[请求错误]
 service-paper-context=论文上下文翻译
 
-pref-provider-preset=服务商
-pref-provider-custom=自定义服务
+pref-provider-preset=接口预设
+pref-provider-custom=自定义接口
 pref-provider-protocol=API 协议
 pref-provider-endpoint=最终请求地址
 pref-provider-timeout=请求超时（秒，1–3600）
 pref-provider-image-test=图片测试
 
 pref-provider-connection=连接
-pref-provider-preset-hint=预设使用 { $protocol } 协议，切换到“自定义服务”可编辑 URL。
+pref-provider-preset-hint=预设使用 { $protocol } 协议，切换到“自定义接口”可编辑 URL 和协议。
 pref-provider-model-options=模型选项
+pref-provider-test=测试
 pref-provider-effort=推理强度
 pref-provider-login=登录
 pref-provider-model-unset=未填写模型

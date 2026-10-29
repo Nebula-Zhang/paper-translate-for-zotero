@@ -78,16 +78,17 @@ sidebar-image-error-detail=Image text recognition failed: { $detail }
 service-errorPrefix=[Request Error]
 service-paper-context=Paper Context Translation
 
-pref-provider-preset=Provider
-pref-provider-custom=Custom provider
+pref-provider-preset=Endpoint preset
+pref-provider-custom=Custom endpoint
 pref-provider-protocol=API protocol
 pref-provider-endpoint=Request endpoint
 pref-provider-timeout=Request timeout (seconds, 1–3600)
 pref-provider-image-test=Image test
 
 pref-provider-connection=Connection
-pref-provider-preset-hint=This preset uses { $protocol }. Choose Custom provider to edit the URL.
+pref-provider-preset-hint=This preset uses { $protocol }. Choose Custom endpoint to edit the URL and protocol.
 pref-provider-model-options=Model options
+pref-provider-test=Test
 pref-provider-effort=Reasoning effort
 pref-provider-login=Login
 pref-provider-model-unset=No model configured

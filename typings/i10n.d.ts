@@ -41,6 +41,7 @@ export type FluentMessageId =
   | 'pref-provider-remove-model'
   | 'pref-provider-save'
   | 'pref-provider-saved'
+  | 'pref-provider-test'
   | 'pref-provider-timeout'
   | 'pref-provider-unnamed'
   | 'pref-provider-use'

@@ -51,3 +51,10 @@ User-authorized scope: implement the approved provider/API design, produce a loc
 - Organize existing AI-provider and translation settings into two keyboard-navigable tabs; do not introduce Agent or MinerU tabs.
 - Keep API protocols, request timeouts, explicit save, current-model selection, text/image tests and deletion safeguards unchanged. No advanced settings disclosure or workspace input is reintroduced.
 - Verify interactions in the actual preferences markup, browser-render collapsed/expanded/narrow views, run regression and static checks, and deliver a local patch XPI without pushing or creating a PR.
+
+## 1.5.4 — native settings layout fixes
+
+- Inspect the installed Zotero preferences stylesheet read-only: its global HTML button rule imposes max-height:25px and negative margins, clipping the multi-line provider heading and shifting tab labels. Reset these rules within the plugin pane, with explicit heading line heights and centered tabs.
+- Keep the model input followed by two consistently sized actions: Test reveals separate text/image test buttons; More retains current-model, removal and Codex effort controls. Opening or dismissing choices never calls a model. Escape restores focus, and a running test disables its trigger.
+- Rename the URL/protocol bundle to Endpoint preset, with Custom endpoint as the explicit manual option. Protocol selection remains visible only for custom endpoints; transport behavior and saved preset IDs remain unchanged.
+- Recheck DOM interactions, native-style reproduction in browser previews, regressions, static checks and the production XPI. Deliver a local patch and commit on dev without pushing or opening a PR.

@@ -457,20 +457,48 @@ function createModelRow(
     }
   });
 
-  const test = actionButton(doc, getString("pref-codex-test"));
-  test.addEventListener("click", () => {
-    void testDraftModel(card, provider, model, test);
+  const testChoices = htmlElement(doc, "div");
+  testChoices.className = "pt-test-choices";
+  testChoices.id = `${config.addonRef}-model-${model.id}-tests`;
+  testChoices.hidden = true;
+  testChoices.setAttribute("role", "group");
+  testChoices.setAttribute("aria-label", getString("pref-provider-test"));
+  const testToggle = actionButton(doc, getString("pref-provider-test"));
+  testToggle.classList.add("pt-test-toggle");
+  testToggle.setAttribute("aria-label", getString("pref-provider-test"));
+  testToggle.setAttribute("aria-controls", testChoices.id);
+  testToggle.setAttribute("aria-expanded", "false");
+  const testChevron = htmlElement(doc, "span");
+  testChevron.textContent = "▾";
+  testChevron.setAttribute("aria-hidden", "true");
+  testToggle.append(testChevron);
+  const closeTestChoices = () => {
+    testChoices.hidden = true;
+    testToggle.setAttribute("aria-expanded", "false");
+  };
+  testToggle.addEventListener("click", () => {
+    testChoices.hidden = !testChoices.hidden;
+    testToggle.setAttribute("aria-expanded", String(!testChoices.hidden));
   });
-  const imageTest = actionButton(doc, "");
-  const imageIcon = htmlElement(doc, "img");
-  imageIcon.src = `chrome://${config.addonRef}/content/icons/action-image.svg`;
-  imageIcon.alt = "";
-  imageTest.append(imageIcon);
-  imageTest.classList.add("pt-icon-button");
-  imageTest.title = getString("pref-provider-image-test");
-  imageTest.setAttribute("aria-label", getString("pref-provider-image-test"));
-  imageTest.addEventListener("click", () => {
-    void testDraftModel(card, provider, model, imageTest, "image");
+  for (const [kind, label] of [
+    ["text", getString("pref-codex-test")],
+    ["image", getString("pref-provider-image-test")],
+  ] as const) {
+    const choice = actionButton(doc, label);
+    choice.addEventListener("click", () => {
+      closeTestChoices();
+      testToggle.focus();
+      void testDraftModel(card, provider, model, testToggle, kind);
+    });
+    testChoices.append(choice);
+  }
+  modelWrap.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !testChoices.hidden) {
+      closeTestChoices();
+      testToggle.focus();
+      event.preventDefault();
+      event.stopPropagation();
+    }
   });
 
   const remove = actionButton(doc, "×");
@@ -489,20 +517,21 @@ function createModelRow(
     params.onDraftsChanged([...params.drafts]);
   });
   settings.append(select, remove);
-  const options = actionButton(doc, "⚙");
+  const options = actionButton(doc, "⋯");
   options.classList.add("pt-icon-button", "pt-model-options");
   options.title = getString("pref-provider-model-options");
   options.setAttribute("aria-label", getString("pref-provider-model-options"));
   options.setAttribute("aria-controls", settings.id);
   options.setAttribute("aria-expanded", String(!settings.hidden));
   options.addEventListener("click", () => {
+    closeTestChoices();
     settings.hidden = !settings.hidden;
     if (settings.hidden) params.openModelIds.delete(model.id);
     else params.openModelIds.add(model.id);
     options.setAttribute("aria-expanded", String(!settings.hidden));
   });
-  row.append(test, imageTest, options);
-  modelWrap.append(row, settings);
+  row.append(testToggle, options);
+  modelWrap.append(row, testChoices, settings);
   return modelWrap;
 }
 

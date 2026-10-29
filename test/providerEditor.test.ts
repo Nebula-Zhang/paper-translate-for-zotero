@@ -226,13 +226,35 @@ test("settings preset selection, custom editing, save, text test and image test 
     assert.equal(saved.activeModelId, "m");
     assert.equal(cancellations, 1);
     assert.equal(requests, 0, "saving does not run a paid connection test");
+    const testToggle = button("pref-provider-test");
+    const testChoices = doc.querySelector(".pt-test-choices") as HTMLElement;
+    assert.equal(testChoices.hidden, true);
+    testToggle.click();
+    assert.equal(testToggle.getAttribute("aria-expanded"), "true");
+    assert.equal(testChoices.hidden, false);
+    assert.equal(requests, 0, "opening test choices never sends a request");
+    button("pref-codex-test").focus();
+    button("pref-codex-test").dispatchEvent(
+      new dom.window.KeyboardEvent("keydown", {
+        key: "Escape",
+        bubbles: true,
+      }),
+    );
+    assert.equal(testChoices.hidden, true);
+    assert.equal(doc.activeElement, testToggle);
+    testToggle.click();
     button("pref-codex-test").click();
+    assert.equal(testChoices.hidden, true);
+    assert.equal(testToggle.getAttribute("aria-expanded"), "false");
+    assert.equal(testToggle.disabled, true);
     await setImmediate();
+    assert.equal(testToggle.disabled, false);
     assert.match(
       doc.querySelector(".papertranslateforzotero-provider-status")!
         .textContent!,
       /success: OK/u,
     );
+    testToggle.click();
     button("pref-provider-image-test").click();
     await setImmediate();
     assert.match(
