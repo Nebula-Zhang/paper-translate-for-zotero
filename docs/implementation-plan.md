@@ -83,3 +83,8 @@ User-authorized scope: implement the approved provider/API design, produce a loc
 - Bind each preference pane once; dispose old listeners when markup is replaced, on unload or plugin shutdown. Restore drafts after pane/window reconstruction, and discard stale drafts if the saved provider configuration was changed elsewhere. Reject malformed draft records without logging credential-bearing JSON fragments. All credential-bearing memory remains exclusively in Zotero preferences.
 - Cover timestamp normalization, cross-page sorting, version order, API/Codex and preset round trips, incomplete drafts, explicit-save isolation, preferences-window reopening, pane reconstruction, duplicate-binding prevention, changed saved baselines and corrupt drafts. Run full regression/static/build/package checks and inspect browser previews; deliver a local XPI and commit on dev without pushing or creating a PR.
 - Official metadata references reviewed 2026-10-29: https://developers.openai.com/api/reference/resources/models/methods/list ; https://platform.claude.com/docs/en/api/models/list . No upstream source or assets were copied.
+
+## PR submission validation
+
+- The repository CI also requires npm audit --omit=dev --audit-level=high. Submission checks identified existing KaTeX and markdown-it advisories in the production dependency lock. Raise their minimum patch versions to KaTeX 0.18.10 and markdown-it 14.3.3, retain their existing minor release lines, and update the lockfile.
+- Rerun the full unit suite, TypeScript, ESLint, formatting, production audit and XPI build after these patch updates. Keep local build artifacts ignored; submit the complete change set from fork dev to upstream dev without publishing a release.
