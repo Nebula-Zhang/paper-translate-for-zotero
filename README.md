@@ -66,7 +66,7 @@ API URL：https://chatgpt.com/backend-api/codex/responses
 
 所有已保存模型中始终只有一个“当前模型”。设置页和 Reader 侧栏共用这项选择；切换后，翻译、论文背景、术语、外部补充和图片 OCR 都只使用这个模型，不会混用其他服务商，也不会在请求失败时自动回退。连接测试只用于帮助用户检查配置，不是保存或选择模型的前置条件。
 
-`Codex Auth` 读取 Codex CLI 的登录凭据；默认位置是 `~/.codex/auth.json`，设置 `CODEX_HOME` 后则读取该目录下的 `auth.json`。`API Key` 按显式选择的协议发送最小请求，不根据模型名称猜测能力。Anthropic Messages 按协议发送版本头和最大输出 Token 数（默认 8192，可在高级设置修改）；工作区 ID 按需要填写。不会自动添加 temperature 或 reasoning 等可选参数。API Key 保存在 Zotero 插件偏好中，不写入论文上下文、日志或导出文件。
+`Codex Auth` 读取 Codex CLI 的登录凭据；默认位置是 `~/.codex/auth.json`，设置 `CODEX_HOME` 后则读取该目录下的 `auth.json`。`API Key` 按显式选择的协议发送最小请求，不根据模型名称猜测能力。设置页直接显示请求超时，不再提供高级设置和 Anthropic 工作区输入框。Anthropic Messages 必需的版本头和输出上限由插件内部处理（输出上限默认 8192），已保存的旧参数保持兼容。不会自动添加 temperature 或 reasoning 等可选参数。API Key 保存在 Zotero 插件偏好中，不写入论文上下文、日志或导出文件。
 
 当 Codex 登录文件缺失、损坏，登录凭据无法刷新或刷新后仍被拒绝时，模型测试、划词翻译和图片取词会明确提示在终端执行 `codex login`。本插件会接管 Codex CLI 已写回的新 access token，但不会重复使用认证服务器已经拒绝的 refresh token。普通 DOM、路径或模型接口错误不会被归类为登录失效。
 

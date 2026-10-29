@@ -39,7 +39,7 @@ export const PROVIDER_PRESETS = [
   },
   {
     id: "anthropic-chat",
-    label: "Anthropic · OpenAI Compatible",
+    label: "Anthropic · Chat Completions（兼容）",
     protocol: "chat_completions",
     url: "https://api.anthropic.com/v1/chat/completions",
   },

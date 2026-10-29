@@ -98,6 +98,26 @@ test("settings preset selection, custom editing, save, text test and image test 
   };
   try {
     registerPrefsScripts(dom.window as unknown as Window, actions);
+    const assertSimpleSettings = () => {
+      assert.equal(
+        doc.querySelector("details"),
+        null,
+        "No advanced settings disclosure",
+      );
+      for (const label of [
+        "pref-provider-workspace",
+        "pref-provider-version",
+        "pref-provider-max-tokens",
+      ]) {
+        assert.equal(doc.querySelector(`[aria-label="${label}"]`), null);
+      }
+      assert.equal(control("pref-provider-timeout").closest("details"), null);
+      assert.equal(
+        control("pref-provider-timeout").closest("section"),
+        doc.querySelector("section"),
+      );
+    };
+    assertSimpleSettings();
     assert.equal(
       (control("pref-provider-preset") as HTMLSelectElement).options.length,
       8,
@@ -156,6 +176,21 @@ test("settings preset selection, custom editing, save, text test and image test 
       /success: TEST 42/u,
     );
     assert.equal(requests, 2);
+    for (const preset of [
+      "anthropic-messages",
+      "anthropic-chat",
+      "deepseek-chat",
+    ]) {
+      change("pref-provider-preset", preset);
+      assertSimpleSettings();
+    }
+    const anthropicOption = doc.querySelector('option[value="anthropic-chat"]');
+    assert.equal(
+      anthropicOption?.textContent,
+      "Anthropic · Chat Completions（兼容）",
+    );
+    change("pref-auth-mode", "codex_auth");
+    assertSimpleSettings();
   } finally {
     dom.window.dispatchEvent(new dom.window.Event("unload"));
     dom.window.close();

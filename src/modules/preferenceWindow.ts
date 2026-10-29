@@ -302,41 +302,6 @@ function createProviderCard(
     });
     updatePreview();
     card.append(apiBase.wrap, preview, apiKey.wrap);
-    const advanced = htmlElement(doc, "details");
-    const summary = htmlElement(doc, "summary");
-    summary.textContent = getString("pref-provider-advanced");
-    advanced.append(summary);
-    if ((provider.protocol ?? "chat_completions") === "anthropic_messages") {
-      const version = labeledInput(
-        doc,
-        getString("pref-provider-version"),
-        provider.anthropicVersion ?? "2023-06-01",
-      );
-      version.input.addEventListener("input", () => {
-        provider.anthropicVersion = version.input.value;
-      });
-      const limit = labeledInput(
-        doc,
-        getString("pref-provider-max-tokens"),
-        String(provider.maxTokens ?? 8192),
-        "number",
-      );
-      limit.input.min = "1";
-      limit.input.addEventListener("input", () => {
-        provider.maxTokens = Number(limit.input.value);
-      });
-      advanced.append(version.wrap, limit.wrap);
-    }
-    const workspace = labeledInput(
-      doc,
-      getString("pref-provider-workspace"),
-      provider.workspaceId ?? "",
-    );
-    workspace.input.addEventListener("input", () => {
-      provider.workspaceId = workspace.input.value;
-    });
-    advanced.append(workspace.wrap);
-    card.append(advanced);
   }
   const timeout = labeledInput(
     doc,

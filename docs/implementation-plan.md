@@ -35,3 +35,10 @@ User-authorized scope: implement the approved provider/API design, produce a loc
 - Settings interaction tests and browser-rendered visual inspection passed.
 - XPI ZIP integrity, ID/version/compatibility, resources, locale strings, no development fixtures, updater and notices verified.
 - An attempted isolated Zotero launch was rejected by automatic approval (blocked by policy, no more specific reason). Native Zotero loading and real provider calls remain unverified; no live credentials were used and the active user profile was not changed.
+
+## 1.5.1 — user-requested settings simplification
+
+- Remove the advanced disclosure and all its input controls; keep request timeout directly visible for both authentication modes.
+- Remove the Anthropic workspace field from the UI. Keep stored protocol parameters compatible; required Anthropic version/output fields still use internal defaults for new configurations.
+- Relabel the Anthropic Chat Completions compatibility preset without changing its ID, protocol or destination.
+- Confirm the simplified UI for OpenAI, Anthropic, DeepSeek and Codex using the existing DOM interaction test; rebuild and deliver a patch XPI without pushing or opening a PR.
